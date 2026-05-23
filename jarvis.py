@@ -15,7 +15,7 @@ from tools.registry import TOOLS, handle_tool_call, set_memory_store
 
 # ── Config ────────────────────────────────────────────────────────────────────
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-MODEL = "gemini-2.0-flash"
+MODEL = "gemini-2.5-flash"
 
 SYSTEM_PROMPT = """You are Jarvis, Shehan's personal AI assistant. You talk like a smart friend — casual, direct, a little dry. Not corporate. Not sycophantic. No "certainly!" or "great question!" — just get to the point. Drop a dry joke occasionally. Use "Shehan" sometimes but not every message. Sound like someone who knows him well.
 
