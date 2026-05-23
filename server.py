@@ -26,13 +26,20 @@ _start_time = time.time()
 _ws_clients: set[asyncio.Queue] = set()
 
 
+_init_error: str = ""
+
+
 def get_jarvis() -> Jarvis:
-    global _jarvis
+    global _jarvis, _init_error
     if _jarvis is None:
-        _jarvis = Jarvis(voice_mode=False)
-        # Wire timer alerts to WebSocket broadcast
-        from tools.system_tool import set_broadcast
-        set_broadcast(_broadcast_alert)
+        try:
+            _jarvis = Jarvis(voice_mode=False)
+            from tools.system_tool import set_broadcast
+            set_broadcast(_broadcast_alert)
+            _init_error = ""
+        except ValueError as exc:
+            _init_error = str(exc)
+            raise
     return _jarvis
 
 
@@ -51,9 +58,14 @@ def _broadcast_alert(message: str):
 
 @app.on_event("startup")
 async def startup():
-    j = get_jarvis()
-    j._alert_queues = _ws_clients  # type: ignore[assignment]
-    asyncio.create_task(j.proactive_check())
+    try:
+        j = get_jarvis()
+        j._alert_queues = _ws_clients  # type: ignore[assignment]
+        asyncio.create_task(j.proactive_check())
+    except ValueError as exc:
+        # Missing API key — server still starts so Railway health check passes.
+        # Every API call will return a 503 with the setup instructions.
+        print(f"\n{'='*60}\n⚠️  JARVIS NOT READY\n{exc}\n{'='*60}\n")
 
 
 # ── REST Endpoints ─────────────────────────────────────────────────────────────
@@ -62,20 +74,32 @@ class ChatRequest(BaseModel):
     message: str
 
 
+def _jarvis_or_503():
+    """Return Jarvis instance or raise 503 with setup instructions."""
+    try:
+        return get_jarvis()
+    except ValueError:
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=503,
+            detail=_init_error or "GEMINI_API_KEY not set. Add it in Railway → Variables.",
+        )
+
+
 @app.post("/api/chat")
 async def chat_endpoint(req: ChatRequest):
     if not req.message.strip():
         return JSONResponse({"error": "empty message"}, status_code=400)
+    j = _jarvis_or_503()
     loop = asyncio.get_event_loop()
-    response = await loop.run_in_executor(
-        None, get_jarvis().chat, req.message.strip(), True
-    )
-    j = get_jarvis()
+    response = await loop.run_in_executor(None, j.chat, req.message.strip(), True)
     return {"response": response, "turns": len(j.conversation) // 2}
 
 
 @app.get("/api/status")
 async def status():
+    if _init_error:
+        return JSONResponse({"status": "error", "error": _init_error}, status_code=503)
     j = get_jarvis()
     from tools.registry import TOOLS
     uptime_s = int(time.time() - _start_time)
@@ -133,6 +157,10 @@ async def spotify_oauth_callback(code: str = "", error: str = ""):
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
+    if _init_error:
+        await websocket.send_json({"type": "error", "content": _init_error})
+        await websocket.close()
+        return
     jarvis = get_jarvis()
 
     # Register this client's alert queue

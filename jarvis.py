@@ -67,6 +67,13 @@ def _build_gemini_tools(anthropic_tools: list) -> list[types.Tool]:
 # ── Jarvis Core ───────────────────────────────────────────────────────────────
 class Jarvis:
     def __init__(self, voice_mode: bool = False):
+        if not GEMINI_API_KEY:
+            raise ValueError(
+                "GEMINI_API_KEY is not set.\n"
+                "  Railway: go to your project → Variables → add GEMINI_API_KEY=AIza...\n"
+                "  Local:   add GEMINI_API_KEY=AIza... to your .env file\n"
+                "  Get a free key at https://aistudio.google.com"
+            )
         self._client = genai.Client(api_key=GEMINI_API_KEY)
         self.memory = MemoryStore()
         set_memory_store(self.memory)
