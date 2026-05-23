@@ -1,18 +1,24 @@
 {
   "name": "Jarvis AI Assistant",
   "short_name": "Jarvis",
-  "description": "Personal AI Assistant powered by Claude",
+  "description": "Personal AI assistant powered by Claude",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0a0a0f",
-  "theme_color": "#0a0a0f",
+  "theme_color": "#00d4ff",
   "orientation": "portrait-primary",
   "icons": [
     {
-      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='50' fill='%230a0a0f'/%3E%3Ccircle cx='50' cy='50' r='38' fill='none' stroke='%2300d4ff' stroke-width='3'/%3E%3Ctext x='50' y='58' text-anchor='middle' font-size='28' font-family='monospace' font-weight='bold' fill='%2300d4ff'%3EAI%3C/text%3E%3C/svg%3E",
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='40' fill='%230a0a0f'/%3E%3Ccircle cx='96' cy='96' r='72' fill='none' stroke='%2300d4ff' stroke-width='4' opacity='0.4'/%3E%3Ccircle cx='96' cy='96' r='56' fill='none' stroke='%2300d4ff' stroke-width='2' opacity='0.7'/%3E%3Ctext x='96' y='116' text-anchor='middle' font-family='system-ui,sans-serif' font-weight='700' font-size='60' fill='%2300d4ff'%3EJ%3C/text%3E%3C/svg%3E",
       "sizes": "192x192",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='100' fill='%230a0a0f'/%3E%3Ccircle cx='256' cy='256' r='196' fill='none' stroke='%2300d4ff' stroke-width='8' opacity='0.4'/%3E%3Ccircle cx='256' cy='256' r='152' fill='none' stroke='%2300d4ff' stroke-width='4' opacity='0.7'/%3E%3Ctext x='256' y='310' text-anchor='middle' font-family='system-ui,sans-serif' font-weight='700' font-size='164' fill='%2300d4ff'%3EJ%3C/text%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
     }
   ]
 }

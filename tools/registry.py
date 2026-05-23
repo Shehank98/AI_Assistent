@@ -1,102 +1,75 @@
 """
-tools/registry.py — All Jarvis tools + dispatcher
-Add new tools here; they're automatically available to Claude.
+tools/registry.py — Central tool registry for Jarvis.
+All tools exposed to Claude are defined and dispatched here.
+Desktop-only tools are excluded when DESKTOP_MODE != "true".
 """
 
 import os
-import subprocess
-import json
-import urllib.request
-import urllib.parse
-from pathlib import Path
-from datetime import datetime
 
-# ── Tool Definitions (Claude's API format) ────────────────────────────────────
-TOOLS = [
-    {
-        "name": "read_file",
-        "description": "Read the contents of a file from disk.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "Absolute or relative file path"}
-            },
-            "required": ["path"],
-        },
-    },
-    {
-        "name": "write_file",
-        "description": "Write or overwrite a file on disk.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string"},
-                "content": {"type": "string", "description": "Text content to write"},
-            },
-            "required": ["path", "content"],
-        },
-    },
-    {
-        "name": "list_directory",
-        "description": "List files and folders in a directory.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "Directory path (default: current dir)"}
-            },
-            "required": [],
-        },
-    },
-    {
-        "name": "run_shell",
-        "description": "Run a shell command and return stdout/stderr. Use for opening apps, running scripts, etc.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "command": {"type": "string", "description": "Shell command to execute"},
-                "timeout": {"type": "integer", "description": "Timeout in seconds (default 30)"},
-            },
-            "required": ["command"],
-        },
-    },
+DESKTOP_MODE = os.environ.get("DESKTOP_MODE", "false").lower() == "true"
+
+# ── Memory store wiring ────────────────────────────────────────────────────────
+_memory_store = None
+
+
+def set_memory_store(store):
+    """Called by Jarvis.__init__ to wire the memory store to all memory tools."""
+    global _memory_store
+    _memory_store = store
+    from tools.memory_tool import set_store
+    set_store(store)
+
+
+# ── Tool Definitions ───────────────────────────────────────────────────────────
+
+_TOOLS_BASE = [
+    # ── Web / Search ──────────────────────────────────────────────────────────
     {
         "name": "web_search",
-        "description": "Search the web using DuckDuckGo and return top results.",
+        "description": "Search the web using DuckDuckGo. Returns instant answers and related topics.",
         "input_schema": {
             "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "Search query"}
-            },
+            "properties": {"query": {"type": "string"}},
             "required": ["query"],
         },
     },
     {
+        "name": "web_fetch",
+        "description": "Fetch and extract readable text from any URL.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"url": {"type": "string", "description": "Full URL to fetch"}},
+            "required": ["url"],
+        },
+    },
+    {
+        "name": "youtube_search",
+        "description": "Search YouTube and return top 3 results with titles and links.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "wikipedia",
+        "description": "Get a Wikipedia summary for a topic or person.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        },
+    },
+
+    # ── System / Utilities ────────────────────────────────────────────────────
+    {
         "name": "get_weather",
-        "description": "Get current weather for a city.",
+        "description": "Get current weather for a city. Defaults to JARVIS_LOCATION if city not given.",
         "input_schema": {
             "type": "object",
-            "properties": {
-                "city": {"type": "string", "description": "City name (e.g. 'Colombo')"}
-            },
-            "required": ["city"],
+            "properties": {"city": {"type": "string", "description": "City name (optional)"}},
+            "required": [],
         },
-    },
-    {
-        "name": "remember_fact",
-        "description": "Save a fact about the user for future sessions (e.g. preferences, name, habits).",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "key": {"type": "string", "description": "Fact label (e.g. 'favorite_coffee')"},
-                "value": {"type": "string", "description": "The fact value"},
-            },
-            "required": ["key", "value"],
-        },
-    },
-    {
-        "name": "recall_facts",
-        "description": "Retrieve all remembered facts about the user.",
-        "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
         "name": "get_datetime",
@@ -104,36 +77,25 @@ TOOLS = [
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
-        "name": "open_url",
-        "description": "Open a URL in the default web browser.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "url": {"type": "string", "description": "Full URL to open"}
-            },
-            "required": ["url"],
-        },
-    },
-    {
         "name": "set_timer",
-        "description": "Set a countdown timer that will alert you when it expires.",
+        "description": "Set a countdown timer that alerts when time is up.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "duration_seconds": {"type": "integer", "description": "Duration in seconds"},
-                "label": {"type": "string", "description": "What the timer is for (e.g. 'tea', 'meeting')"},
+                "label": {"type": "string", "description": "What the timer is for"},
             },
             "required": ["duration_seconds"],
         },
     },
     {
         "name": "create_note",
-        "description": "Save a note as a markdown file in ~/Notes/.",
+        "description": "Save a note to ~/Notes/ as a markdown file.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "title": {"type": "string", "description": "Note title"},
-                "content": {"type": "string", "description": "Note content"},
+                "title": {"type": "string"},
+                "content": {"type": "string"},
             },
             "required": ["title", "content"],
         },
@@ -145,223 +107,524 @@ TOOLS = [
     },
     {
         "name": "read_note",
-        "description": "Read the contents of a saved note by title.",
+        "description": "Read a saved note by title (partial match ok).",
+        "input_schema": {
+            "type": "object",
+            "properties": {"title": {"type": "string"}},
+            "required": ["title"],
+        },
+    },
+    {
+        "name": "read_file",
+        "description": "Read the contents of a file from disk.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"path": {"type": "string", "description": "File path"}},
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "write_file",
+        "description": "Write or create a file on disk.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "title": {"type": "string", "description": "Note title (partial match ok)"}
+                "path": {"type": "string"},
+                "content": {"type": "string"},
             },
-            "required": ["title"],
+            "required": ["path", "content"],
+        },
+    },
+    {
+        "name": "list_directory",
+        "description": "List files and folders in a directory.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"path": {"type": "string", "description": "Directory path"}},
+            "required": [],
+        },
+    },
+
+    # ── Memory ────────────────────────────────────────────────────────────────
+    {
+        "name": "remember",
+        "description": "Save a fact about Shehan for future sessions (e.g. preferences, habits).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "key": {"type": "string", "description": "Fact label"},
+                "value": {"type": "string", "description": "Fact value"},
+            },
+            "required": ["key", "value"],
+        },
+    },
+    {
+        "name": "recall",
+        "description": "Retrieve a specific remembered fact by key.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"key": {"type": "string"}},
+            "required": ["key"],
+        },
+    },
+    {
+        "name": "recall_all",
+        "description": "Return everything Jarvis knows about Shehan.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "forget",
+        "description": "Delete a remembered fact.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"key": {"type": "string"}},
+            "required": ["key"],
+        },
+    },
+    {
+        "name": "add_task",
+        "description": "Add a task to the task list with optional due date.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task": {"type": "string"},
+                "due_date": {"type": "string", "description": "YYYY-MM-DD (optional)"},
+            },
+            "required": ["task"],
+        },
+    },
+    {
+        "name": "list_tasks",
+        "description": "List all pending tasks.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "complete_task",
+        "description": "Mark a task as done by its ID.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"task_id": {"type": "integer"}},
+            "required": ["task_id"],
+        },
+    },
+    {
+        "name": "list_tasks_due_today",
+        "description": "List tasks due today.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+
+    # ── Gmail ─────────────────────────────────────────────────────────────────
+    {
+        "name": "gmail_unread",
+        "description": "Get unread emails. Flags [person] vs [auto] (newsletters/automated).",
+        "input_schema": {
+            "type": "object",
+            "properties": {"max_results": {"type": "integer", "description": "Max emails (default 15)"}},
+            "required": [],
+        },
+    },
+    {
+        "name": "gmail_search",
+        "description": "Search Gmail by any query string (e.g. 'from:boss@company.com', 'subject:invoice').",
+        "input_schema": {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "gmail_read_full",
+        "description": "Read the full body of an email by ID (use the ID from gmail_unread/gmail_search).",
+        "input_schema": {
+            "type": "object",
+            "properties": {"email_id": {"type": "string"}},
+            "required": ["email_id"],
+        },
+    },
+    {
+        "name": "gmail_send",
+        "description": "Send an email.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "to": {"type": "string", "description": "Recipient email address"},
+                "subject": {"type": "string"},
+                "body": {"type": "string"},
+            },
+            "required": ["to", "subject", "body"],
+        },
+    },
+    {
+        "name": "gmail_reply",
+        "description": "Reply to an email thread by email ID.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "email_id": {"type": "string"},
+                "body": {"type": "string"},
+            },
+            "required": ["email_id", "body"],
+        },
+    },
+    {
+        "name": "gmail_mark_read",
+        "description": "Mark an email as read by ID.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"email_id": {"type": "string"}},
+            "required": ["email_id"],
+        },
+    },
+    {
+        "name": "gmail_important_check",
+        "description": "Check for emails from real people (not automated) in the last 24h.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+
+    # ── Calendar ──────────────────────────────────────────────────────────────
+    {
+        "name": "calendar_today",
+        "description": "Get all events on the calendar today.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "calendar_tomorrow",
+        "description": "Get tomorrow's calendar events.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "calendar_week",
+        "description": "Get events for the next 7 days, grouped by day.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "calendar_upcoming",
+        "description": "Get events starting within N minutes (default 30).",
+        "input_schema": {
+            "type": "object",
+            "properties": {"minutes": {"type": "integer", "description": "Look-ahead window in minutes"}},
+            "required": [],
+        },
+    },
+    {
+        "name": "calendar_create",
+        "description": "Create a calendar event.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "date": {"type": "string", "description": "YYYY-MM-DD"},
+                "time": {"type": "string", "description": "HH:MM (24h)"},
+                "duration_minutes": {"type": "integer", "description": "Duration (default 60)"},
+                "description": {"type": "string"},
+            },
+            "required": ["title", "date", "time"],
+        },
+    },
+    {
+        "name": "calendar_delete",
+        "description": "Delete a calendar event by ID.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"event_id": {"type": "string"}},
+            "required": ["event_id"],
+        },
+    },
+
+    # ── Spotify ───────────────────────────────────────────────────────────────
+    {
+        "name": "spotify_play",
+        "description": "Search and play a song, artist, or playlist on Spotify.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"query": {"type": "string", "description": "Song name, artist, or playlist"}},
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "spotify_pause",
+        "description": "Pause Spotify playback.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "spotify_resume",
+        "description": "Resume Spotify playback.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "spotify_next",
+        "description": "Skip to the next track on Spotify.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "spotify_current",
+        "description": "What is currently playing on Spotify.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "spotify_volume",
+        "description": "Set Spotify volume (0-100).",
+        "input_schema": {
+            "type": "object",
+            "properties": {"level": {"type": "integer", "description": "Volume 0-100"}},
+            "required": ["level"],
+        },
+    },
+    {
+        "name": "spotify_queue",
+        "description": "Add a song to the Spotify queue.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        },
+    },
+
+    # ── News ──────────────────────────────────────────────────────────────────
+    {
+        "name": "news_headlines",
+        "description": "Get top headlines. category: general/tech/world/business. country: lk/us/gb/etc.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "category": {"type": "string", "description": "general|tech|world|business"},
+                "country": {"type": "string", "description": "Country code (default: lk)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "news_search",
+        "description": "Search news by topic or keyword.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "news_tech",
+        "description": "Get latest tech news (TechCrunch).",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+]
+
+# Desktop-only tools (excluded on Railway)
+_TOOLS_DESKTOP = [
+    {
+        "name": "open_url",
+        "description": "Open a URL in the default browser. Desktop only.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"url": {"type": "string"}},
+            "required": ["url"],
+        },
+    },
+    {
+        "name": "run_shell",
+        "description": "Execute a shell command and return output. Desktop only.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string"},
+                "timeout": {"type": "integer", "description": "Timeout seconds (default 30)"},
+            },
+            "required": ["command"],
+        },
+    },
+    {
+        "name": "whatsapp_send",
+        "description": "Send a WhatsApp message. Desktop only — requires WhatsApp Web logged in.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "phone_number": {"type": "string", "description": "International format: +94771234567"},
+                "message": {"type": "string"},
+            },
+            "required": ["phone_number", "message"],
+        },
+    },
+    {
+        "name": "whatsapp_send_to_contact",
+        "description": "Send WhatsApp to a saved contact by name. Desktop only.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Contact name (partial match ok)"},
+                "message": {"type": "string"},
+            },
+            "required": ["name", "message"],
         },
     },
 ]
 
-
-# ── Tool Implementations ───────────────────────────────────────────────────────
-
-def _read_file(path: str) -> str:
-    try:
-        return Path(path).read_text(encoding="utf-8")
-    except Exception as e:
-        return f"Error reading file: {e}"
-
-
-def _write_file(path: str, content: str) -> str:
-    try:
-        p = Path(path)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content, encoding="utf-8")
-        return f"Written {len(content)} chars to {path}"
-    except Exception as e:
-        return f"Error writing file: {e}"
-
-
-def _list_directory(path: str = ".") -> str:
-    try:
-        entries = list(Path(path).iterdir())
-        lines = [f"{'[DIR] ' if e.is_dir() else '      '}{e.name}" for e in sorted(entries)]
-        return "\n".join(lines) or "(empty)"
-    except Exception as e:
-        return f"Error: {e}"
-
-
-def _run_shell(command: str, timeout: int = 30) -> str:
-    try:
-        result = subprocess.run(
-            command, shell=True, capture_output=True, text=True, timeout=timeout
-        )
-        out = result.stdout.strip()
-        err = result.stderr.strip()
-        parts = []
-        if out:
-            parts.append(f"STDOUT:\n{out}")
-        if err:
-            parts.append(f"STDERR:\n{err}")
-        parts.append(f"Exit code: {result.returncode}")
-        return "\n".join(parts)
-    except subprocess.TimeoutExpired:
-        return "Command timed out."
-    except Exception as e:
-        return f"Error: {e}"
-
-
-def _web_search(query: str) -> str:
-    """DuckDuckGo Instant Answer API (no key needed)."""
-    try:
-        encoded = urllib.parse.quote_plus(query)
-        url = f"https://api.duckduckgo.com/?q={encoded}&format=json&no_redirect=1&no_html=1"
-        req = urllib.request.Request(url, headers={"User-Agent": "Jarvis/1.0"})
-        with urllib.request.urlopen(req, timeout=10) as r:
-            data = json.loads(r.read())
-        results = []
-        if data.get("AbstractText"):
-            results.append(f"Summary: {data['AbstractText']}")
-        for item in data.get("RelatedTopics", [])[:5]:
-            if isinstance(item, dict) and item.get("Text"):
-                results.append(f"• {item['Text']}")
-        return "\n".join(results) if results else "No instant answer found. Try a more specific query."
-    except Exception as e:
-        return f"Search error: {e}"
-
-
-def _get_weather(city: str) -> str:
-    """Uses wttr.in (no API key needed)."""
-    try:
-        encoded = urllib.parse.quote_plus(city)
-        url = f"https://wttr.in/{encoded}?format=j1"
-        req = urllib.request.Request(url, headers={"User-Agent": "Jarvis/1.0"})
-        with urllib.request.urlopen(req, timeout=10) as r:
-            data = json.loads(r.read())
-        current = data["current_condition"][0]
-        desc = current["weatherDesc"][0]["value"]
-        temp_c = current["temp_C"]
-        feels = current["FeelsLikeC"]
-        humidity = current["humidity"]
-        return (
-            f"{city}: {desc}, {temp_c}°C (feels like {feels}°C), "
-            f"Humidity: {humidity}%"
-        )
-    except Exception as e:
-        return f"Weather error: {e}"
-
-
-def _get_datetime() -> str:
-    return datetime.now().strftime("%A, %B %d %Y — %I:%M %p")
-
-
-def _open_url(url: str) -> str:
-    try:
-        import webbrowser
-        webbrowser.open(url)
-        return f"Opened {url} in browser."
-    except Exception as e:
-        return f"Error: {e}"
-
-
-NOTES_DIR = Path.home() / "Notes"
-
-
-def _set_timer(duration_seconds: int, label: str = "Timer") -> str:
-    import threading
-    def _ring():
-        print(f"\n[TIMER] ⏰ {label} — done!")
-        try:
-            from voice.tts import speak
-            speak(f"{label} is done, sir.", voice=True)
-        except Exception:
-            pass
-    t = threading.Timer(duration_seconds, _ring)
-    t.daemon = True
-    t.start()
-    mins, secs = divmod(duration_seconds, 60)
-    time_str = f"{mins}m {secs}s" if mins else f"{secs}s"
-    return f"Timer set: '{label}' fires in {time_str}."
-
-
-def _create_note(title: str, content: str) -> str:
-    try:
-        NOTES_DIR.mkdir(parents=True, exist_ok=True)
-        filename = title.lower().replace(" ", "_").replace("/", "-") + ".md"
-        path = NOTES_DIR / filename
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-        path.write_text(f"# {title}\n_Created: {timestamp}_\n\n{content}\n", encoding="utf-8")
-        return f"Note saved: {path}"
-    except Exception as e:
-        return f"Error saving note: {e}"
-
-
-def _list_notes() -> str:
-    NOTES_DIR.mkdir(parents=True, exist_ok=True)
-    notes = sorted(NOTES_DIR.glob("*.md"))
-    if not notes:
-        return "No notes found."
-    return "\n".join(f"• {n.stem.replace('_', ' ')}" for n in notes)
-
-
-def _read_note(title: str) -> str:
-    slug = title.lower().replace(" ", "_")
-    path = NOTES_DIR / (slug + ".md")
-    if not path.exists():
-        matches = list(NOTES_DIR.glob(f"*{slug}*.md"))
-        if matches:
-            path = matches[0]
-        else:
-            return f"Note '{title}' not found. Use list_notes to see available notes."
-    try:
-        return path.read_text(encoding="utf-8")
-    except Exception as e:
-        return f"Error reading note: {e}"
-
-
-# Memory backed by the MemoryStore imported in jarvis.py
-# These are shims that the dispatcher calls; memory object passed in separately.
-_memory_store = None
-
-def _remember_fact(key: str, value: str) -> str:
-    if _memory_store:
-        _memory_store.save_fact(key, value)
-        return f"Remembered: {key} = {value}"
-    return "Memory not initialised."
-
-def _recall_facts() -> str:
-    if _memory_store:
-        facts = _memory_store.get_all_facts()
-        if not facts:
-            return "No facts stored yet."
-        return "\n".join(f"{k}: {v}" for k, v in facts.items())
-    return "Memory not initialised."
+TOOLS = _TOOLS_BASE + (_TOOLS_DESKTOP if DESKTOP_MODE else [])
 
 
 # ── Dispatcher ────────────────────────────────────────────────────────────────
-TOOL_MAP = {
-    "read_file": lambda inp: _read_file(inp["path"]),
-    "write_file": lambda inp: _write_file(inp["path"], inp["content"]),
-    "list_directory": lambda inp: _list_directory(inp.get("path", ".")),
-    "run_shell": lambda inp: _run_shell(inp["command"], inp.get("timeout", 30)),
-    "web_search": lambda inp: _web_search(inp["query"]),
-    "get_weather": lambda inp: _get_weather(inp["city"]),
-    "get_datetime": lambda inp: _get_datetime(),
-    "open_url": lambda inp: _open_url(inp["url"]),
-    "remember_fact": lambda inp: _remember_fact(inp["key"], inp["value"]),
-    "recall_facts": lambda inp: _recall_facts(),
-    "set_timer": lambda inp: _set_timer(inp["duration_seconds"], inp.get("label", "Timer")),
-    "create_note": lambda inp: _create_note(inp["title"], inp["content"]),
-    "list_notes": lambda inp: _list_notes(),
-    "read_note": lambda inp: _read_note(inp["title"]),
-}
-
 
 def handle_tool_call(name: str, inputs: dict) -> str:
-    handler = TOOL_MAP.get(name)
-    if not handler:
-        return f"Unknown tool: {name}"
-    try:
-        return handler(inputs)
-    except Exception as e:
-        return f"Tool '{name}' error: {e}"
+    from tools import memory_tool, web_tool, system_tool, news_tool
 
+    # Lazy imports for optional tool modules
+    def _try_import(module_name):
+        try:
+            import importlib
+            return importlib.import_module(f"tools.{module_name}")
+        except Exception:
+            return None
 
-def set_memory_store(store):
-    """Called by jarvis.py to wire up the memory store to tools."""
-    global _memory_store
-    _memory_store = store
+    # ── Web
+    if name == "web_search":
+        return web_tool.web_search(inputs["query"])
+    if name == "web_fetch":
+        return web_tool.web_fetch(inputs["url"])
+    if name == "youtube_search":
+        return web_tool.youtube_search(inputs["query"])
+    if name == "wikipedia":
+        return web_tool.wikipedia(inputs["query"])
+
+    # ── System
+    if name == "get_weather":
+        return system_tool.get_weather(inputs.get("city", ""))
+    if name == "get_datetime":
+        return system_tool.get_datetime()
+    if name == "set_timer":
+        return system_tool.set_timer(inputs["duration_seconds"], inputs.get("label", "Timer"))
+    if name == "create_note":
+        return system_tool.create_note(inputs["title"], inputs["content"])
+    if name == "list_notes":
+        return system_tool.list_notes()
+    if name == "read_note":
+        return system_tool.read_note(inputs["title"])
+    if name == "read_file":
+        from pathlib import Path
+        try:
+            return Path(inputs["path"]).read_text(encoding="utf-8")
+        except Exception as e:
+            return f"Error: {e}"
+    if name == "write_file":
+        from pathlib import Path
+        try:
+            p = Path(inputs["path"])
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(inputs["content"], encoding="utf-8")
+            return f"Written to {inputs['path']}"
+        except Exception as e:
+            return f"Error: {e}"
+    if name == "list_directory":
+        from pathlib import Path
+        try:
+            entries = list(Path(inputs.get("path", ".")).iterdir())
+            lines = [f"{'[DIR] ' if e.is_dir() else '      '}{e.name}" for e in sorted(entries)]
+            return "\n".join(lines) or "(empty)"
+        except Exception as e:
+            return f"Error: {e}"
+    if name == "open_url":
+        return system_tool.open_url(inputs["url"])
+    if name == "run_shell":
+        return system_tool.run_shell(inputs["command"], inputs.get("timeout", 30))
+
+    # ── Memory
+    if name == "remember":
+        return memory_tool.remember(inputs["key"], inputs["value"])
+    if name == "recall":
+        return memory_tool.recall(inputs["key"])
+    if name == "recall_all":
+        return memory_tool.recall_all()
+    if name == "forget":
+        return memory_tool.forget(inputs["key"])
+    if name == "add_task":
+        return memory_tool.add_task(inputs["task"], inputs.get("due_date", ""))
+    if name == "list_tasks":
+        return memory_tool.list_tasks()
+    if name == "complete_task":
+        return memory_tool.complete_task(inputs["task_id"])
+    if name == "list_tasks_due_today":
+        return memory_tool.list_tasks_due_today()
+
+    # ── Gmail
+    if name == "gmail_unread":
+        m = _try_import("gmail_tool")
+        return m.gmail_unread(inputs.get("max_results", 15)) if m else "Gmail not available."
+    if name == "gmail_search":
+        m = _try_import("gmail_tool")
+        return m.gmail_search(inputs["query"]) if m else "Gmail not available."
+    if name == "gmail_read_full":
+        m = _try_import("gmail_tool")
+        return m.gmail_read_full(inputs["email_id"]) if m else "Gmail not available."
+    if name == "gmail_send":
+        m = _try_import("gmail_tool")
+        return m.gmail_send(inputs["to"], inputs["subject"], inputs["body"]) if m else "Gmail not available."
+    if name == "gmail_reply":
+        m = _try_import("gmail_tool")
+        return m.gmail_reply(inputs["email_id"], inputs["body"]) if m else "Gmail not available."
+    if name == "gmail_mark_read":
+        m = _try_import("gmail_tool")
+        return m.gmail_mark_read(inputs["email_id"]) if m else "Gmail not available."
+    if name == "gmail_important_check":
+        m = _try_import("gmail_tool")
+        return m.gmail_important_check() if m else "Gmail not available."
+
+    # ── Calendar
+    if name == "calendar_today":
+        m = _try_import("calendar_tool")
+        return m.calendar_today() if m else "Calendar not available."
+    if name == "calendar_tomorrow":
+        m = _try_import("calendar_tool")
+        return m.calendar_tomorrow() if m else "Calendar not available."
+    if name == "calendar_week":
+        m = _try_import("calendar_tool")
+        return m.calendar_week() if m else "Calendar not available."
+    if name == "calendar_upcoming":
+        m = _try_import("calendar_tool")
+        return m.calendar_upcoming(inputs.get("minutes", 30)) if m else "Calendar not available."
+    if name == "calendar_create":
+        m = _try_import("calendar_tool")
+        return m.calendar_create(inputs["title"], inputs["date"], inputs["time"],
+                                  inputs.get("duration_minutes", 60),
+                                  inputs.get("description", "")) if m else "Calendar not available."
+    if name == "calendar_delete":
+        m = _try_import("calendar_tool")
+        return m.calendar_delete(inputs["event_id"]) if m else "Calendar not available."
+
+    # ── Spotify
+    if name == "spotify_play":
+        m = _try_import("spotify_tool")
+        return m.spotify_play(inputs["query"]) if m else "Spotify not available."
+    if name == "spotify_pause":
+        m = _try_import("spotify_tool")
+        return m.spotify_pause() if m else "Spotify not available."
+    if name == "spotify_resume":
+        m = _try_import("spotify_tool")
+        return m.spotify_resume() if m else "Spotify not available."
+    if name == "spotify_next":
+        m = _try_import("spotify_tool")
+        return m.spotify_next() if m else "Spotify not available."
+    if name == "spotify_current":
+        m = _try_import("spotify_tool")
+        return m.spotify_current() if m else "Spotify not available."
+    if name == "spotify_volume":
+        m = _try_import("spotify_tool")
+        return m.spotify_volume(inputs["level"]) if m else "Spotify not available."
+    if name == "spotify_queue":
+        m = _try_import("spotify_tool")
+        return m.spotify_queue(inputs["query"]) if m else "Spotify not available."
+
+    # ── News
+    if name == "news_headlines":
+        return news_tool.news_headlines(inputs.get("category", "general"), inputs.get("country", "lk"))
+    if name == "news_search":
+        return news_tool.news_search(inputs["query"])
+    if name == "news_tech":
+        return news_tool.news_tech()
+
+    # ── WhatsApp (desktop only)
+    if name == "whatsapp_send":
+        m = _try_import("whatsapp_tool")
+        return m.whatsapp_send(inputs["phone_number"], inputs["message"]) if m else "WhatsApp not available."
+    if name == "whatsapp_send_to_contact":
+        m = _try_import("whatsapp_tool")
+        return m.whatsapp_send_to_contact(inputs["name"], inputs["message"]) if m else "WhatsApp not available."
+
+    return f"Unknown tool: {name}"

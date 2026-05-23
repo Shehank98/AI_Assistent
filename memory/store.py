@@ -1,12 +1,11 @@
 """
 memory/store.py — Persistent memory using SQLite
-Stores long-term facts + conversation summaries.
+Stores long-term facts, tasks, and conversation summaries.
 """
 
 import sqlite3
-import json
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
 DB_PATH = Path.home() / ".jarvis" / "memory.db"
 
@@ -20,8 +19,8 @@ class MemoryStore:
     def _init_schema(self):
         self.conn.executescript("""
             CREATE TABLE IF NOT EXISTS facts (
-                key   TEXT PRIMARY KEY,
-                value TEXT NOT NULL,
+                key        TEXT PRIMARY KEY,
+                value      TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
 
@@ -30,10 +29,18 @@ class MemoryStore:
                 summary    TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS tasks (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                task       TEXT NOT NULL,
+                due_date   TEXT,
+                done       INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            );
         """)
         self.conn.commit()
 
-    # ── Facts (long-term user info) ───────────────────────────────────────────
+    # ── Facts ─────────────────────────────────────────────────────────────────
 
     def save_fact(self, key: str, value: str):
         self.conn.execute(
@@ -56,7 +63,34 @@ class MemoryStore:
         self.conn.execute("DELETE FROM facts WHERE key = ?", (key.lower().strip(),))
         self.conn.commit()
 
-    # ── Conversation summaries ────────────────────────────────────────────────
+    # ── Tasks ─────────────────────────────────────────────────────────────────
+
+    def add_task(self, task: str, due_date: str | None = None) -> int:
+        cur = self.conn.execute(
+            "INSERT INTO tasks (task, due_date, done, created_at) VALUES (?, ?, 0, ?)",
+            (task, due_date, datetime.now().isoformat()),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def list_tasks(self, done: bool = False) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT id, task, due_date, done FROM tasks WHERE done = ?", (1 if done else 0,)
+        ).fetchall()
+        return [{"id": r[0], "task": r[1], "due_date": r[2], "done": bool(r[3])} for r in rows]
+
+    def list_tasks_due_today(self) -> list[dict]:
+        today = datetime.now().strftime("%Y-%m-%d")
+        rows = self.conn.execute(
+            "SELECT id, task, due_date FROM tasks WHERE done = 0 AND due_date = ?", (today,)
+        ).fetchall()
+        return [{"id": r[0], "task": r[1], "due_date": r[2]} for r in rows]
+
+    def complete_task(self, task_id: int):
+        self.conn.execute("UPDATE tasks SET done = 1 WHERE id = ?", (task_id,))
+        self.conn.commit()
+
+    # ── Conversations ─────────────────────────────────────────────────────────
 
     def save_conversation_summary(self, summary: str):
         self.conn.execute(

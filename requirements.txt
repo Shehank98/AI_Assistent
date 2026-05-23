@@ -1,25 +1,43 @@
 # JARVIS — Python requirements
 # ─────────────────────────────────────────────────────────────────
 
-# Core (always required)
+# Core
 anthropic>=0.25.0
 
-# Web server — mobile interface
+# Web server
 fastapi>=0.111.0
-uvicorn[standard]>=0.29.0    # includes websockets + httptools
-aiofiles>=23.2.0             # static file serving
-python-dotenv>=1.0.0         # load .env for API keys
+uvicorn[standard]>=0.29.0
+aiofiles>=23.2.0
+python-dotenv>=1.0.0
+
+# Google (Gmail + Calendar)
+google-auth>=2.29.0
+google-auth-oauthlib>=1.2.0
+google-api-python-client>=2.127.0
+
+# Spotify
+spotipy>=2.23.0
+
+# News RSS fallback (optional — falls back to raw urllib if build fails)
+# feedparser>=6.0.10
+
+# Web fetch (readable text extraction)
+trafilatura>=1.8.0
+
+# YouTube search (no API key needed)
+# youtube-search-python>=1.6.6   # install with: pip install youtube-search-python
+
+# WhatsApp (desktop only — requires WhatsApp Web in browser)
+# pywhatkit>=5.4
 
 # Voice — Speech to Text (install when ready for voice mode)
 # openai-whisper
-# pyaudio          # may need: apt install portaudio19-dev  OR  brew install portaudio
+# pyaudio          # apt install portaudio19-dev && pip install pyaudio
 
 # Voice — Text to Speech (cascade: first available wins)
-# pyttsx3          # always works, robotic voice, no setup needed
-# TTS              # Coqui TTS — local, decent quality: pip install TTS
-# elevenlabs       # Best quality — set ELEVENLABS_API_KEY env var
+# pyttsx3
+# TTS              # Coqui: pip install TTS
+# elevenlabs
 
-# Wake word (optional, install last)
-# pvporcupine      # Picovoice — free tier works fine
-
-# Memory: sqlite3 is Python stdlib — no install needed
+# Wake word (optional)
+# pvporcupine

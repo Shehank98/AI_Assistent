@@ -13,36 +13,71 @@
   <title>Jarvis</title>
 </head>
 <body>
+
+  <!-- Notification banner for proactive alerts -->
+  <div id="alert-banner" class="alert-banner hidden">
+    <span id="alert-text"></span>
+    <button id="alert-close">✕</button>
+  </div>
+
+  <!-- Header -->
   <header>
     <div id="status-dot" class="dot offline" title="Connecting..."></div>
     <h1>J.A.R.V.I.S</h1>
-    <div class="header-actions">
-      <button id="tts-btn" class="icon-btn" title="Toggle voice responses">🔊</button>
-      <button id="clear-btn" class="icon-btn" title="Clear conversation">↺</button>
-    </div>
+    <button id="settings-btn" class="icon-btn" title="Settings">⚙</button>
   </header>
 
-  <main id="conversation">
-    <div class="message jarvis welcome">
-      Online and ready, sir. How can I assist you today?
-    </div>
-  </main>
+  <!-- Conversation -->
+  <main id="conversation"></main>
 
+  <!-- Footer / Input -->
   <footer>
     <div id="input-row">
       <textarea
         id="text-input"
-        placeholder="Ask Jarvis..."
+        placeholder="Message Jarvis..."
         rows="1"
         autocomplete="off"
         autocorrect="on"
         spellcheck="true"
       ></textarea>
-      <button id="mic-btn" class="icon-btn" title="Voice input">🎤</button>
+      <button id="mic-btn" class="icon-btn mic" title="Voice input">🎤</button>
       <button id="send-btn" class="send-btn" title="Send">▶</button>
     </div>
     <div id="voice-status"></div>
   </footer>
+
+  <!-- Settings Drawer -->
+  <div id="settings-overlay" class="hidden"></div>
+  <aside id="settings-drawer" class="closed">
+    <div class="drawer-header">
+      <h2>Settings</h2>
+      <button id="settings-close" class="icon-btn">✕</button>
+    </div>
+
+    <div class="setting-row">
+      <label for="tts-toggle">Voice responses</label>
+      <input type="checkbox" id="tts-toggle" class="toggle">
+    </div>
+
+    <div class="setting-row">
+      <span>Connection</span>
+      <span id="conn-status-text" class="status-text">—</span>
+    </div>
+
+    <div class="setting-row">
+      <span>Tools active</span>
+      <span id="tool-count-text" class="status-text">—</span>
+    </div>
+
+    <button id="clear-btn" class="danger-btn">Clear conversation</button>
+
+    <div class="memory-section">
+      <h3>What Jarvis remembers</h3>
+      <div id="memory-list" class="memory-list">Loading...</div>
+      <button id="refresh-memory" class="secondary-btn">Refresh</button>
+    </div>
+  </aside>
 
   <script src="/app.js"></script>
 </body>
