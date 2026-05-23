@@ -250,6 +250,66 @@ _TOOLS_BASE = [
         },
     },
 
+    # ── Goals ─────────────────────────────────────────────────────────────────
+    {
+        "name": "create_goal",
+        "description": "Create a persistent goal tracked across sessions. Use for multi-step objectives, 'remind me until X happens', or anything Shehan wants Jarvis to keep track of long-term.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "description": {"type": "string", "description": "The goal to achieve"},
+                "deadline": {"type": "string", "description": "Optional deadline in YYYY-MM-DD format"},
+            },
+            "required": ["description"],
+        },
+    },
+    {
+        "name": "list_goals",
+        "description": "List goals by status. Use to check what's being tracked.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "description": "active | completed | all (default: active)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "complete_goal",
+        "description": "Mark a goal as achieved with an optional result summary.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "goal_id": {"type": "integer", "description": "Goal ID from list_goals"},
+                "result": {"type": "string", "description": "What was accomplished (optional)"},
+            },
+            "required": ["goal_id"],
+        },
+    },
+    {
+        "name": "cancel_goal",
+        "description": "Cancel an active goal that is no longer needed.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"goal_id": {"type": "integer"}},
+            "required": ["goal_id"],
+        },
+    },
+
+    # ── Research agent ────────────────────────────────────────────────────────
+    {
+        "name": "research_agent",
+        "description": "Spawn a focused research sub-agent that searches multiple sources and returns a synthesised brief. Use for deep research that needs more than one or two searches — market analysis, technical deep-dives, news aggregation, background on a person/company/topic.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "topic": {"type": "string", "description": "What to research"},
+                "depth": {"type": "string", "description": "shallow (3 searches) | medium (6) | deep (12). Default: medium"},
+            },
+            "required": ["topic"],
+        },
+    },
+
     # ── Gmail ─────────────────────────────────────────────────────────────────
     {
         "name": "gmail_unread",
@@ -585,6 +645,18 @@ def handle_tool_call(name: str, inputs: dict) -> str:
         return memory_tool.update_routine(inputs["routine_name"], inputs["description"])
     if name == "log_mood":
         return memory_tool.log_mood(inputs["mood"], inputs.get("context", ""))
+
+    # ── Goals
+    if name == "create_goal":
+        return memory_tool.create_goal(inputs["description"], inputs.get("deadline", ""))
+    if name == "list_goals":
+        return memory_tool.list_goals(inputs.get("status", "active"))
+    if name == "complete_goal":
+        return memory_tool.complete_goal(inputs["goal_id"], inputs.get("result", ""))
+    if name == "cancel_goal":
+        return memory_tool.cancel_goal(inputs["goal_id"])
+
+    # research_agent is handled directly in jarvis.py's agentic loop
 
     # ── Gmail
     if name == "gmail_unread":

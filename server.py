@@ -131,7 +131,8 @@ async def startup():
     try:
         j = get_jarvis()
         j._alert_queues = _ws_clients
-        asyncio.create_task(j.proactive_check())
+        from agent.scheduler import setup_scheduler
+        setup_scheduler(j)
     except ValueError as exc:
         print(f"\n{'='*60}\n⚠️  JARVIS NOT READY\n{exc}\n{'='*60}\n")
 
@@ -194,6 +195,21 @@ async def get_conversation():
         if text_parts:
             turns.append({"role": role, "text": " ".join(text_parts)})
     return {"turns": turns, "count": len(turns)}
+
+
+@app.get("/api/goals")
+async def get_goals(status: str = "active"):
+    valid = {"active", "completed", "cancelled", "all"}
+    if status not in valid:
+        return JSONResponse({"error": f"status must be one of {valid}"}, status_code=400)
+    goals = get_jarvis().memory.list_goals(None if status == "all" else status)
+    return {"goals": goals, "count": len(goals)}
+
+
+@app.delete("/api/goals/{goal_id}")
+async def cancel_goal_endpoint(goal_id: int):
+    get_jarvis().memory.update_goal(goal_id, status="cancelled")
+    return {"cancelled": goal_id}
 
 
 @app.get("/api/memory")

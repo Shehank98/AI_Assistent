@@ -14,6 +14,12 @@ python-dotenv>=1.0.0
 # Encryption at rest (memory store)
 cryptography>=42.0.0
 
+# PostgreSQL (Railway production; falls back to SQLite locally when DATABASE_URL unset)
+psycopg2-binary>=2.9.9
+
+# Background scheduler — proactive email/calendar/goal alerts
+apscheduler>=3.10.0
+
 # Google Cloud TTS client library
 google-cloud-texttospeech>=2.16.0
 

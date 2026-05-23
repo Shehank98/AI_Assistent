@@ -108,3 +108,40 @@ def log_mood(mood: str, context: str = "") -> str:
     """Log Shehan's mood. Called silently when emotional context is detected."""
     _require_store().log_mood(mood, context)
     return f"Mood logged: {mood}"
+
+
+# ── Goals ──────────────────────────────────────────────────────────────────────
+
+def create_goal(description: str, deadline: str = "") -> str:
+    """Create a persistent goal tracked across sessions."""
+    store = _require_store()
+    goal_id = store.create_goal(description, deadline or None)
+    due = f", deadline {deadline}" if deadline else ""
+    return f"Goal #{goal_id} created: '{description}'{due}"
+
+
+def list_goals(status: str = "active") -> str:
+    """List goals by status (active/completed/all)."""
+    store = _require_store()
+    query_status = None if status == "all" else status
+    goals = store.list_goals(query_status)
+    if not goals:
+        return f"No {status} goals."
+    lines = []
+    for g in goals:
+        due = f" (due {g['deadline']})" if g.get("deadline") else ""
+        result = f" → {g['result']}" if g.get("result") else ""
+        lines.append(f"#{g['id']} [{g['status']}] {g['description']}{due}{result}")
+    return "\n".join(lines)
+
+
+def complete_goal(goal_id: int, result: str = "") -> str:
+    """Mark a goal as completed."""
+    _require_store().update_goal(int(goal_id), status="completed", result=result or None)
+    return f"Goal #{goal_id} completed."
+
+
+def cancel_goal(goal_id: int) -> str:
+    """Cancel an active goal."""
+    _require_store().update_goal(int(goal_id), status="cancelled")
+    return f"Goal #{goal_id} cancelled."

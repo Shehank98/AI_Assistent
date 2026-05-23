@@ -85,23 +85,67 @@ class Jarvis:
         facts = self.memory.get_all_facts()
         prefs = self.memory.get_preferences()
         routines = self.memory.get_routines()
+        active_goals = self.memory.list_goals(status="active")
 
         extra = []
         if facts:
-            extra.append("What Jarvis knows about Shehan:\n" + "\n".join(f"- {k}: {v}" for k, v in facts.items()))
+            extra.append("What Jarvis knows:\n" + "\n".join(f"- {k}: {v}" for k, v in facts.items()))
         if prefs:
             by_cat: dict = {}
             for p in prefs:
                 by_cat.setdefault(p["category"], []).append(p["preference"])
-            extra.append("Learned preferences:\n" + "\n".join(
+            extra.append("Preferences:\n" + "\n".join(
                 f"- {cat}: " + "; ".join(ps) for cat, ps in by_cat.items()
             ))
         if routines:
-            extra.append("Known routines:\n" + "\n".join(f"- {n}: {d}" for n, d in routines.items()))
+            extra.append("Routines:\n" + "\n".join(f"- {n}: {d}" for n, d in routines.items()))
+        if active_goals:
+            lines = []
+            for g in active_goals:
+                due = f" (due {g['deadline']})" if g.get("deadline") else ""
+                lines.append(f"- #{g['id']}: {g['description']}{due}")
+            extra.append("Active goals:\n" + "\n".join(lines))
 
         if extra:
             return SYSTEM_PROMPT + "\n\n" + "\n\n".join(extra)
         return SYSTEM_PROMPT
+
+    def _run_research_agent(self, topic: str, depth: str = "medium") -> str:
+        """Focused research sub-agent — multiple web searches, synthesised brief."""
+        max_steps = {"shallow": 3, "medium": 6, "deep": 12}.get(depth, 6)
+        research_system = (
+            "You are a research assistant. Search and synthesise findings into a concise, factual brief. "
+            "Search multiple sources. Note conflicting info. "
+            "Return structured plain text: Summary, Key Facts, Sources."
+        )
+        research_tool_names = {"web_search", "web_fetch", "wikipedia", "youtube_search"}
+        research_gemini_tools = _build_gemini_tools(
+            [t for t in TOOLS if t["name"] in research_tool_names]
+        )
+        convo = [types.Content(role="user", parts=[types.Part(text=f"Research: {topic}")])]
+        cfg = types.GenerateContentConfig(
+            system_instruction=research_system,
+            tools=research_gemini_tools,
+            max_output_tokens=4096,
+        )
+        for _ in range(max_steps):
+            resp = self._client.models.generate_content(model=MODEL, contents=convo, config=cfg)
+            content = resp.candidates[0].content
+            convo.append(content)
+            fn_calls = [p for p in content.parts if p.function_call is not None]
+            if not fn_calls:
+                return " ".join(p.text for p in content.parts if p.text).strip()
+            parts = []
+            for part in fn_calls:
+                fc = part.function_call
+                result = handle_tool_call(fc.name, dict(fc.args))
+                parts.append(types.Part(
+                    function_response=types.FunctionResponse(
+                        name=fc.name, response={"result": str(result)[:3000]},
+                    )
+                ))
+            convo.append(types.Content(role="user", parts=parts))
+        return "Research sub-agent reached step limit — partial results above."
 
     def _run_agentic_loop(self, user_input: str) -> str:
         self.conversation.append(
@@ -111,7 +155,7 @@ class Jarvis:
         config = types.GenerateContentConfig(
             system_instruction=self._build_system(),
             tools=self._gemini_tools,
-            max_output_tokens=2048,
+            max_output_tokens=4096,
         )
 
         while True:
@@ -138,7 +182,12 @@ class Jarvis:
                 fc = part.function_call
                 args = dict(fc.args)
                 print(f"  🔧 {fc.name}({json.dumps(args)})")
-                result = handle_tool_call(fc.name, args)
+                if fc.name == "research_agent":
+                    result = self._run_research_agent(
+                        args.get("topic", ""), args.get("depth", "medium")
+                    )
+                else:
+                    result = handle_tool_call(fc.name, args)
                 fn_response_parts.append(
                     types.Part(
                         function_response=types.FunctionResponse(
@@ -168,42 +217,6 @@ class Jarvis:
             except Exception:
                 dead.add(q)
         self._alert_queues -= dead
-
-    async def proactive_check(self):
-        from datetime import datetime
-        from tools.gmail_tool import gmail_important_check
-        from tools.calendar_tool import calendar_upcoming
-        from tools.memory_tool import list_tasks_due_today
-
-        last_task_alert_date = None
-
-        while True:
-            await asyncio.sleep(15 * 60)
-            now = datetime.now()
-
-            try:
-                emails = gmail_important_check()
-                if emails and not emails.startswith(("No new", "Error", "Gmail")):
-                    self._broadcast_alert(f"📬 {emails.splitlines()[0]}")
-            except Exception:
-                pass
-
-            try:
-                upcoming = calendar_upcoming(30)
-                if upcoming and not upcoming.startswith(("No events", "Error", "Calendar")):
-                    self._broadcast_alert(f"📅 {upcoming.splitlines()[0]}")
-            except Exception:
-                pass
-
-            try:
-                today_str = now.strftime("%Y-%m-%d")
-                if now.hour == 9 and last_task_alert_date != today_str:
-                    tasks = list_tasks_due_today()
-                    if tasks and not tasks.startswith("No tasks"):
-                        self._broadcast_alert(f"📋 Tasks due today: {tasks.splitlines()[0]}")
-                    last_task_alert_date = today_str
-            except Exception:
-                pass
 
     def run_text_loop(self):
         print("=" * 50)
