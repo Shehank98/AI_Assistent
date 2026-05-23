@@ -14,6 +14,8 @@ let recognition = null;
 let voiceState = 'idle';  // idle | listening | processing | speaking
 let continuousMode = localStorage.getItem('continuousMode') !== 'false'; // default ON
 let ttsEnabled = localStorage.getItem('tts') === 'true';
+let useServerSTT = localStorage.getItem('useServerSTT') === 'true'; // default OFF
+let mediaRecorder = null;
 let thinkingEl = null;
 let settingsOpen = false;
 let silenceTimer = null;
@@ -42,6 +44,7 @@ const settingsOverlay = document.getElementById('settings-overlay');
 const clearBtn        = document.getElementById('clear-btn');
 const ttsToggle       = document.getElementById('tts-toggle');
 const continuousToggle= document.getElementById('continuous-toggle');
+const serverSttToggle = document.getElementById('server-stt-toggle');
 const connStatusText  = document.getElementById('conn-status-text');
 const toolCountText   = document.getElementById('tool-count-text');
 const memoryList      = document.getElementById('memory-list');
@@ -57,6 +60,7 @@ const tokenInput      = document.getElementById('token-input');
 // ── Init ──────────────────────────────────────────────────────────────────────
 ttsToggle.checked = ttsEnabled;
 continuousToggle.checked = continuousMode;
+if (serverSttToggle) serverSttToggle.checked = useServerSTT;
 if (tokenInput) tokenInput.value = jarvisToken;
 
 connectWS();
@@ -273,7 +277,7 @@ function initSpeechRecognition() {
   recognition = new SR();
   recognition.continuous = false;
   recognition.interimResults = true;
-  recognition.lang = 'en-US';
+  recognition.lang = '';  // auto-detect — handles Sinhala, Tamil, English
 
   recognition.onstart = () => {
     setVoiceState('listening');
@@ -340,8 +344,8 @@ function initSpeechRecognition() {
     }
   };
 
-  // Start continuous mode automatically
-  if (continuousMode) {
+  // Start continuous mode automatically (browser STT only)
+  if (continuousMode && !useServerSTT) {
     setTimeout(() => startListening(), 500);
   }
 }
@@ -366,12 +370,82 @@ function stopListening() {
 }
 
 function toggleListening() {
+  if (useServerSTT) {
+    if (voiceState === 'listening') {
+      stopServerSTT();
+    } else if (voiceState !== 'processing') {
+      startServerSTT();
+    }
+    return;
+  }
   if (!recognition) return;
   if (voiceState === 'listening') {
     stopListening();
   } else {
     startListening();
   }
+}
+
+// ── Server-side STT (MediaRecorder → /api/stt) ───────────────────────────────
+async function startServerSTT() {
+  if (!micStream) {
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    } catch (_) {
+      showMicPermissionBanner();
+      return;
+    }
+  }
+
+  const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg';
+  const chunks = [];
+  mediaRecorder = new MediaRecorder(micStream, { mimeType });
+
+  mediaRecorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+  mediaRecorder.onstop = async () => {
+    const blob = new Blob(chunks, { type: mimeType });
+    setVoiceState('processing');
+    try {
+      const res = await apiFetch('/api/stt', {
+        method: 'POST',
+        body: blob,
+        headers: { 'Content-Type': mimeType },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const transcript = data.transcript?.trim();
+        if (transcript) {
+          textInput.value = transcript;
+          textInput.classList.remove('interim');
+          // Barge-in: interrupt TTS if speaking
+          if (voiceState === 'speaking') window.speechSynthesis?.cancel();
+          sendMessage(transcript);
+        } else {
+          voiceStatus.textContent = 'Nothing heard — tap mic to try again';
+          setVoiceState('idle');
+        }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        voiceStatus.textContent = err.detail || 'STT error';
+        setVoiceState('idle');
+      }
+    } catch {
+      voiceStatus.textContent = 'Server STT unavailable';
+      setVoiceState('idle');
+    }
+  };
+
+  mediaRecorder.start(100);
+  setVoiceState('listening');
+  startWaveform();
+}
+
+function stopServerSTT() {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
+  }
+  mediaRecorder = null;
+  stopWaveform();
 }
 
 // ── Waveform visualization ────────────────────────────────────────────────────
@@ -594,13 +668,28 @@ ttsToggle.addEventListener('change', () => {
 continuousToggle.addEventListener('change', () => {
   continuousMode = continuousToggle.checked;
   localStorage.setItem('continuousMode', continuousMode);
-  if (continuousMode) {
+  if (continuousMode && !useServerSTT) {
     startListening();
   } else {
     stopListening();
     window.speechSynthesis?.cancel();
   }
 });
+
+if (serverSttToggle) {
+  serverSttToggle.addEventListener('change', () => {
+    useServerSTT = serverSttToggle.checked;
+    localStorage.setItem('useServerSTT', useServerSTT);
+    if (useServerSTT) {
+      // Stop browser recognition
+      try { recognition?.stop(); } catch (_) {}
+      setVoiceState('idle');
+      voiceStatus.textContent = 'Tap mic to record — server STT active';
+    } else if (continuousMode && recognition) {
+      startListening();
+    }
+  });
+}
 
 if (tokenInput) {
   tokenInput.addEventListener('change', () => {

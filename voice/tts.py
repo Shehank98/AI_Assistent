@@ -16,14 +16,24 @@ ELEVENLABS_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "pNInz6obpgDQGcFmaJg
 GOOGLE_TTS_KEY = os.environ.get("GOOGLE_TTS_KEY", "")
 
 
+def _is_sinhala(text: str) -> bool:
+    import re
+    return bool(re.search(r'[඀-෿]', text))
+
+
 def speak(text: str, voice: bool = False):
     """Speak text aloud if voice=True, otherwise just print."""
     if not voice or not text.strip():
         return
 
-    if ELEVENLABS_API_KEY and _speak_elevenlabs(text):
+    sinhala = _is_sinhala(text)
+    lang = "si" if sinhala else "en"
+
+    # Google TTS first when key set (handles Sinhala + English)
+    if GOOGLE_TTS_KEY and _speak_google_tts(text, lang):
         return
-    if GOOGLE_TTS_KEY and _speak_google_tts(text):
+    # ElevenLabs for English only (no Sinhala support)
+    if ELEVENLABS_API_KEY and not sinhala and _speak_elevenlabs(text):
         return
     if _speak_pyttsx3(text):
         return
@@ -73,17 +83,24 @@ def _speak_elevenlabs(text: str) -> bool:
 
 
 # ── Google Cloud TTS ──────────────────────────────────────────────────────────
-def _speak_google_tts(text: str) -> bool:
+_GOOGLE_VOICES = {
+    "si": {"languageCode": "si-LK", "name": "si-LK-Standard-A"},
+    "en": {"languageCode": "en-US", "name": "en-US-Neural2-D"},
+}
+
+
+def _speak_google_tts(text: str, lang: str = "en") -> bool:
     try:
         import urllib.request
         import json
         import base64
         import tempfile
 
+        voice = _GOOGLE_VOICES.get(lang, _GOOGLE_VOICES["en"])
         url = f"https://texttospeech.googleapis.com/v1/text:synthesize?key={GOOGLE_TTS_KEY}"
         payload = json.dumps({
             "input": {"text": text},
-            "voice": {"languageCode": "en-US", "name": "en-US-Neural2-D"},
+            "voice": voice,
             "audioConfig": {"audioEncoding": "MP3"},
         }).encode()
 

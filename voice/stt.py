@@ -5,7 +5,19 @@ Install:  pip install openai-whisper pyaudio
 Optional: pip install pvporcupine  (for wake-word detection)
 """
 
+import os
 import sys
+
+WHISPER_LANGUAGE = os.environ.get("WHISPER_LANGUAGE", "auto")
+
+
+def _whisper_lang() -> str | None:
+    """Return Whisper language code or None for auto-detect."""
+    lang = WHISPER_LANGUAGE.strip().lower()
+    if lang in ("auto", "", "none"):
+        return None  # Whisper auto-detects
+    return lang  # e.g. "si", "en", "ta"
+
 
 # ── Lazy imports so text mode works without audio deps ────────────────────────
 def listen(wake_word: bool = False, timeout: int = 10) -> str | None:
@@ -44,7 +56,7 @@ def listen(wake_word: bool = False, timeout: int = 10) -> str | None:
         _save_wav(f.name, audio_data)
 
     try:
-        result = listen._model.transcribe(tmp_path, language="en")
+        result = listen._model.transcribe(tmp_path, language=_whisper_lang())
         text = result["text"].strip()
         print(f"[STT] Heard: {text}")
         return text if text else None

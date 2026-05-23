@@ -32,6 +32,24 @@ JARVIS_ACCESS_TOKEN = os.environ.get("JARVIS_ACCESS_TOKEN", "")
 PRIVACY_MODE = os.environ.get("PRIVACY_MODE", "false").lower() == "true"
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
 ELEVENLABS_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "pNInz6obpgDQGcFmaJgB")  # Adam
+GOOGLE_TTS_KEY = os.environ.get("GOOGLE_TTS_KEY", "")
+WHISPER_LANGUAGE = os.environ.get("WHISPER_LANGUAGE", "auto")
+
+_GOOGLE_TTS_VOICES = {
+    "si": {"languageCode": "si-LK", "name": "si-LK-Standard-A"},
+    "en": {"languageCode": "en-US", "name": "en-US-Neural2-D"},
+}
+
+
+def _detect_lang(text: str) -> str:
+    """Return 'si' if text contains Sinhala script, else 'en'."""
+    import re
+    return "si" if re.search(r'[඀-෿]', text) else "en"
+
+
+def _whisper_lang() -> str | None:
+    lang = WHISPER_LANGUAGE.strip().lower()
+    return None if lang in ("auto", "", "none") else lang
 
 
 # ── Suppress access logs for chat/ws routes (contain conversation content) ─────
@@ -188,22 +206,17 @@ async def get_memory():
 
 @app.post("/api/tts")
 async def tts_endpoint(req: TTSRequest):
-    if not ELEVENLABS_API_KEY:
-        raise_503 = True
-        try:
-            import urllib.request
-        except ImportError:
-            pass
-        from fastapi import HTTPException
-        raise HTTPException(status_code=503, detail="ElevenLabs API key not configured. Set ELEVENLABS_API_KEY.")
+    from fastapi import HTTPException
+    import re, json as _json, urllib.request
+
+    if not GOOGLE_TTS_KEY and not ELEVENLABS_API_KEY:
+        raise HTTPException(status_code=503, detail="No TTS configured. Set GOOGLE_TTS_KEY or ELEVENLABS_API_KEY.")
 
     text = req.text.strip()
     if not text:
-        from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="Empty text")
 
-    # Strip markdown for TTS
-    import re
+    # Strip markdown
     text = re.sub(r'```[\s\S]*?```', '', text)
     text = re.sub(r'`[^`]+`', '', text)
     text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
@@ -211,38 +224,59 @@ async def tts_endpoint(req: TTSRequest):
     text = re.sub(r'[*_#]', '', text)
     text = re.sub(r'\n+', ' ', text).strip()
 
-    import json as _json
-    import urllib.request
+    lang = _detect_lang(text)
 
+    # Sinhala → Google TTS (ElevenLabs has no Sinhala support)
+    if lang == "si" or (GOOGLE_TTS_KEY and not ELEVENLABS_API_KEY):
+        if not GOOGLE_TTS_KEY:
+            raise HTTPException(status_code=503, detail="Sinhala TTS requires GOOGLE_TTS_KEY")
+        voice = _GOOGLE_TTS_VOICES.get(lang, _GOOGLE_TTS_VOICES["en"])
+        url = f"https://texttospeech.googleapis.com/v1/text:synthesize?key={GOOGLE_TTS_KEY}"
+        payload = _json.dumps({
+            "input": {"text": text},
+            "voice": voice,
+            "audioConfig": {"audioEncoding": "MP3"},
+        }).encode()
+        try:
+            req_obj = urllib.request.Request(url, data=payload,
+                                             headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req_obj, timeout=15) as resp:
+                import base64
+                audio_data = base64.b64decode(_json.loads(resp.read())["audioContent"])
+            return StreamingResponse(
+                io.BytesIO(audio_data),
+                media_type="audio/mpeg",
+                headers={"Content-Disposition": "inline; filename=response.mp3",
+                         "X-Detected-Language": lang},
+            )
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Google TTS error: {e}")
+
+    # English → ElevenLabs
+    if not ELEVENLABS_API_KEY:
+        raise HTTPException(status_code=503, detail="ELEVENLABS_API_KEY not configured")
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}/stream"
     payload = _json.dumps({
         "text": text,
         "model_id": "eleven_monolingual_v1",
-        "voice_settings": {
-            "stability": 0.5,
-            "similarity_boost": 0.8,
-            "style": 0.2,
-            "use_speaker_boost": True,
-        },
+        "voice_settings": {"stability": 0.5, "similarity_boost": 0.8,
+                           "style": 0.2, "use_speaker_boost": True},
     }).encode()
-
-    headers = {
-        "xi-api-key": ELEVENLABS_API_KEY,
-        "Content-Type": "application/json",
-        "Accept": "audio/mpeg",
-    }
-
     try:
-        req_obj = urllib.request.Request(url, data=payload, headers=headers)
+        req_obj = urllib.request.Request(url, data=payload, headers={
+            "xi-api-key": ELEVENLABS_API_KEY,
+            "Content-Type": "application/json",
+            "Accept": "audio/mpeg",
+        })
         with urllib.request.urlopen(req_obj, timeout=20) as resp:
             audio_data = resp.read()
         return StreamingResponse(
             io.BytesIO(audio_data),
             media_type="audio/mpeg",
-            headers={"Content-Disposition": "inline; filename=response.mp3"},
+            headers={"Content-Disposition": "inline; filename=response.mp3",
+                     "X-Detected-Language": lang},
         )
     except Exception as e:
-        from fastapi import HTTPException
         raise HTTPException(status_code=502, detail=f"ElevenLabs error: {e}")
 
 
@@ -266,8 +300,13 @@ async def stt_endpoint(request: Request):
     try:
         loop = asyncio.get_event_loop()
         model = await loop.run_in_executor(None, _whisper.load_model, "base")
-        result = await loop.run_in_executor(None, model.transcribe, tmp_path)
-        return {"transcript": result["text"].strip()}
+        lang = _whisper_lang()
+        transcribe_fn = lambda: model.transcribe(tmp_path, language=lang)
+        result = await loop.run_in_executor(None, transcribe_fn)
+        return {
+            "transcript": result["text"].strip(),
+            "detected_language": result.get("language", lang or "unknown"),
+        }
     except Exception as e:
         from fastapi import HTTPException
         raise HTTPException(status_code=500, detail=f"Whisper error: {e}")
