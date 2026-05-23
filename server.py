@@ -82,7 +82,7 @@ async def status():
     h, m, s = uptime_s // 3600, (uptime_s % 3600) // 60, uptime_s % 60
     return {
         "status": "online",
-        "model": "claude-sonnet-4-6",
+        "model": "gemini-2.0-flash",
         "tools": [t["name"] for t in TOOLS],
         "tool_count": len(TOOLS),
         "memory_facts": len(j.memory.get_all_facts()),

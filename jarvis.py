@@ -1,21 +1,21 @@
 """
 JARVIS — Personal AI Assistant
-Core orchestration loop: Voice → Claude → Tools → Voice
+Core orchestration loop: Voice → Gemini → Tools → Voice
 """
 
 import asyncio
 import json
 import os
 
-import anthropic
+from google import genai
+from google.genai import types
 
 from memory.store import MemoryStore
 from tools.registry import TOOLS, handle_tool_call, set_memory_store
 
 # ── Config ────────────────────────────────────────────────────────────────────
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-MODEL = "claude-sonnet-4-6"
-MAX_TOKENS = 2048
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+MODEL = "gemini-2.0-flash"
 
 SYSTEM_PROMPT = """You are Jarvis, Shehan's personal AI assistant. You talk like a smart friend — casual, direct, a little dry. Not corporate. Not sycophantic. No "certainly!" or "great question!" — just get to the point. Drop a dry joke occasionally. Use "Shehan" sometimes but not every message. Sound like someone who knows him well.
 
@@ -28,16 +28,53 @@ You remember things about Shehan across sessions via the memory tools. When he t
 Be brief unless detail is requested. When uncertain, ask one short question. Never pad responses."""
 
 
+# ── Tool format conversion (Anthropic → Gemini) ───────────────────────────────
+_TYPE_MAP = {
+    "string": "STRING",
+    "integer": "INTEGER",
+    "number": "NUMBER",
+    "boolean": "BOOLEAN",
+    "array": "ARRAY",
+    "object": "OBJECT",
+}
+
+
+def _build_gemini_tools(anthropic_tools: list) -> list[types.Tool]:
+    """Convert Anthropic-format tool definitions to a single Gemini Tool."""
+    declarations = []
+    for t in anthropic_tools:
+        schema = t.get("input_schema", {})
+        props = {}
+        for name, prop in schema.get("properties", {}).items():
+            props[name] = types.Schema(
+                type=_TYPE_MAP.get(prop.get("type", "string"), "STRING"),
+                description=prop.get("description", ""),
+            )
+        parameters = types.Schema(
+            type="OBJECT",
+            properties=props,
+            required=schema.get("required", []),
+        ) if props else None
+
+        declarations.append(types.FunctionDeclaration(
+            name=t["name"],
+            description=t["description"],
+            parameters=parameters,
+        ))
+    return [types.Tool(function_declarations=declarations)]
+
+
 # ── Jarvis Core ───────────────────────────────────────────────────────────────
 class Jarvis:
     def __init__(self, voice_mode: bool = False):
-        self.client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        self._client = genai.Client(api_key=GEMINI_API_KEY)
         self.memory = MemoryStore()
         set_memory_store(self.memory)
-        self.conversation: list[dict] = []
+        # Conversation stored as list[types.Content] — Gemini's native format
+        self.conversation: list[types.Content] = []
         self.voice_mode = voice_mode
-        # Set of asyncio queues — one per connected WebSocket client
         self._alert_queues: set = set()
+        self._gemini_tools = _build_gemini_tools(TOOLS)
 
     def _build_system(self) -> str:
         facts = self.memory.get_all_facts()
@@ -47,36 +84,60 @@ class Jarvis:
         return SYSTEM_PROMPT
 
     def _run_agentic_loop(self, user_input: str) -> str:
-        self.conversation.append({"role": "user", "content": user_input})
+        self.conversation.append(
+            types.Content(role="user", parts=[types.Part(text=user_input)])
+        )
+
+        config = types.GenerateContentConfig(
+            system_instruction=self._build_system(),
+            tools=self._gemini_tools,
+            max_output_tokens=2048,
+        )
 
         while True:
-            response = self.client.messages.create(
+            response = self._client.models.generate_content(
                 model=MODEL,
-                max_tokens=MAX_TOKENS,
-                system=self._build_system(),
-                tools=TOOLS,
-                messages=self.conversation,
+                contents=self.conversation,
+                config=config,
             )
 
-            self.conversation.append({"role": "assistant", "content": response.content})
+            candidate = response.candidates[0]
+            content = candidate.content
 
-            if response.stop_reason == "end_turn":
-                text_blocks = [b.text for b in response.content if hasattr(b, "text")]
-                return " ".join(text_blocks)
+            # Record the model turn
+            self.conversation.append(content)
 
-            tool_results = []
-            for block in response.content:
-                if block.type == "tool_use":
-                    print(f"  🔧 {block.name}({json.dumps(block.input)})")
-                    result = handle_tool_call(block.name, block.input)
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": str(result),
-                    })
+            # Collect any function calls in this turn
+            fn_calls = [p for p in content.parts if p.function_call is not None]
 
-            if tool_results:
-                self.conversation.append({"role": "user", "content": tool_results})
+            if not fn_calls:
+                # No tool calls — extract text and return
+                text = " ".join(
+                    p.text for p in content.parts
+                    if p.text is not None
+                ).strip()
+                return text
+
+            # Execute every tool call, collect responses
+            fn_response_parts = []
+            for part in fn_calls:
+                fc = part.function_call
+                args = dict(fc.args)
+                print(f"  🔧 {fc.name}({json.dumps(args)})")
+                result = handle_tool_call(fc.name, args)
+                fn_response_parts.append(
+                    types.Part(
+                        function_response=types.FunctionResponse(
+                            name=fc.name,
+                            response={"result": str(result)},
+                        )
+                    )
+                )
+
+            # Feed all results back in a single user turn
+            self.conversation.append(
+                types.Content(role="user", parts=fn_response_parts)
+            )
 
     def chat(self, user_input: str, silent: bool = False) -> str:
         """Process one turn. silent=True suppresses console prints (used by server)."""
@@ -99,36 +160,32 @@ class Jarvis:
 
     async def proactive_check(self):
         """Background task — checks every 15 min and pushes alerts to connected clients."""
-        import time
+        from datetime import datetime
         from tools.gmail_tool import gmail_important_check
         from tools.calendar_tool import calendar_upcoming
         from tools.memory_tool import list_tasks_due_today
 
-        last_email_ids: set = set()
         last_task_alert_date = None
 
         while True:
             await asyncio.sleep(15 * 60)
-            now = __import__("datetime").datetime.now()
+            now = datetime.now()
 
             try:
-                # New emails from real people
                 emails = gmail_important_check()
-                if emails and not emails.startswith("No new") and not emails.startswith("Error") and not emails.startswith("Gmail"):
+                if emails and not emails.startswith(("No new", "Error", "Gmail")):
                     self._broadcast_alert(f"📬 {emails.splitlines()[0]}")
             except Exception:
                 pass
 
             try:
-                # Upcoming calendar events
                 upcoming = calendar_upcoming(30)
-                if upcoming and not upcoming.startswith("No events") and not upcoming.startswith("Error") and not upcoming.startswith("Calendar"):
+                if upcoming and not upcoming.startswith(("No events", "Error", "Calendar")):
                     self._broadcast_alert(f"📅 {upcoming.splitlines()[0]}")
             except Exception:
                 pass
 
             try:
-                # Daily task summary at 9am (once per day)
                 today_str = now.strftime("%Y-%m-%d")
                 if now.hour == 9 and last_task_alert_date != today_str:
                     tasks = list_tasks_due_today()
