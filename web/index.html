@@ -14,6 +14,22 @@
 </head>
 <body>
 
+  <!-- Approval modal -->
+  <div id="approval-overlay" class="approval-overlay hidden">
+    <div id="approval-card" class="approval-card">
+      <div class="approval-header">
+        <span class="approval-icon">⚠️</span>
+        <span id="approval-action" class="approval-action"></span>
+      </div>
+      <pre id="approval-preview" class="approval-preview"></pre>
+      <div class="approval-timer-bar"><div id="approval-timer-fill" class="approval-timer-fill"></div></div>
+      <div class="approval-buttons">
+        <button id="approval-deny"    class="approval-btn deny">Cancel</button>
+        <button id="approval-approve" class="approval-btn approve">Do it ✓</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Notification banner -->
   <div id="alert-banner" class="alert-banner hidden">
     <span id="alert-text"></span>

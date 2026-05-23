@@ -310,6 +310,190 @@ _TOOLS_BASE = [
         },
     },
 
+    # ── Google Tasks ──────────────────────────────────────────────────────────
+    {
+        "name": "tasks_list",
+        "description": "List all pending Google Tasks (syncs with phone).",
+        "input_schema": {"type": "object", "properties": {"max_results": {"type": "integer"}}, "required": []},
+    },
+    {
+        "name": "tasks_create",
+        "description": "Create a Google Task (appears on phone). Use instead of add_task when the user wants it in Google Tasks.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "due_date": {"type": "string", "description": "YYYY-MM-DD"},
+                "notes": {"type": "string"},
+            },
+            "required": ["title"],
+        },
+    },
+    {
+        "name": "tasks_complete",
+        "description": "Mark a Google Task as completed by its short ID.",
+        "input_schema": {"type": "object", "properties": {"task_id": {"type": "string"}}, "required": ["task_id"]},
+    },
+    {
+        "name": "tasks_today",
+        "description": "List Google Tasks due today.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+
+    # ── Google Contacts ───────────────────────────────────────────────────────
+    {
+        "name": "contacts_search",
+        "description": "Search Google Contacts by name. Returns name + email + phone. Use before sending email to look up someone's address.",
+        "input_schema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]},
+    },
+    {
+        "name": "contacts_get_email",
+        "description": "Get the email address for a contact by name. Use when Shehan says 'email [name]' without specifying the address.",
+        "input_schema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]},
+    },
+    {
+        "name": "contacts_list_frequent",
+        "description": "List recently modified Google Contacts.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+
+    # ── Google Drive ──────────────────────────────────────────────────────────
+    {
+        "name": "drive_search",
+        "description": "Search Google Drive files by name or content.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "max_results": {"type": "integer", "description": "Default 8"},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "drive_read",
+        "description": "Read the content of a Google Doc or text file by Drive file ID.",
+        "input_schema": {"type": "object", "properties": {"file_id": {"type": "string"}}, "required": ["file_id"]},
+    },
+    {
+        "name": "drive_list_recent",
+        "description": "List Google Drive files modified in the last N days.",
+        "input_schema": {"type": "object", "properties": {"days": {"type": "integer"}}, "required": []},
+    },
+    {
+        "name": "drive_create_doc",
+        "description": "Create a new Google Doc with content. Use for saving research briefs, weekly reviews, etc.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"title": {"type": "string"}, "content": {"type": "string"}},
+            "required": ["title", "content"],
+        },
+    },
+
+    # ── Google Sheets ─────────────────────────────────────────────────────────
+    {
+        "name": "sheets_read",
+        "description": "Read data from a Google Sheets spreadsheet. Requires spreadsheet_id.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "spreadsheet_id": {"type": "string"},
+                "range_": {"type": "string", "description": "e.g. Sheet1!A1:E20"},
+            },
+            "required": ["spreadsheet_id"],
+        },
+    },
+    {
+        "name": "sheets_append",
+        "description": "Append a row of data to a Google Sheets spreadsheet.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "spreadsheet_id": {"type": "string"},
+                "values": {"type": "array", "items": {"type": "string"}, "description": "Row values"},
+                "sheet_name": {"type": "string", "description": "Default: Sheet1"},
+            },
+            "required": ["spreadsheet_id", "values"],
+        },
+    },
+    {
+        "name": "sheets_create",
+        "description": "Create a new Google Spreadsheet with optional column headers.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "headers": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["title"],
+        },
+    },
+
+    # ── YouTube ───────────────────────────────────────────────────────────────
+    {
+        "name": "youtube_transcript",
+        "description": "Fetch the full transcript of a YouTube video by URL. Use to summarise videos, extract key info, or answer questions about video content.",
+        "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]},
+    },
+    {
+        "name": "youtube_summarise",
+        "description": "Fetch YouTube transcript and prepare it for summarisation. Returns transcript with a summarise prompt.",
+        "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]},
+    },
+
+    # ── Code execution ────────────────────────────────────────────────────────
+    {
+        "name": "run_python",
+        "description": "Execute Python code in a sandboxed subprocess. Returns stdout/stderr. Use for calculations, data processing, quick scripts.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "code": {"type": "string", "description": "Python code to execute"},
+                "timeout": {"type": "integer", "description": "Seconds, default 15"},
+            },
+            "required": ["code"],
+        },
+    },
+
+    # ── GitHub ────────────────────────────────────────────────────────────────
+    {
+        "name": "github_search",
+        "description": "Search GitHub repositories, code, or issues. Requires GITHUB_TOKEN.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "type_": {"type": "string", "description": "repositories | code | issues"},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "github_create_issue",
+        "description": "Create a GitHub issue. Requires GITHUB_TOKEN.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "owner/repo"},
+                "title": {"type": "string"},
+                "body": {"type": "string"},
+            },
+            "required": ["repo", "title"],
+        },
+    },
+    {
+        "name": "github_my_repos",
+        "description": "List your GitHub repositories sorted by recent activity.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+
+    # ── Self-awareness ────────────────────────────────────────────────────────
+    {
+        "name": "jarvis_status",
+        "description": "Return Jarvis's own health: uptime, tools, facts learned, active goals. Use when asked 'how are you', 'are you working', 'what do you know about me'.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+
     # ── Gmail ─────────────────────────────────────────────────────────────────
     {
         "name": "gmail_unread",
@@ -657,6 +841,86 @@ def handle_tool_call(name: str, inputs: dict) -> str:
         return memory_tool.cancel_goal(inputs["goal_id"])
 
     # research_agent is handled directly in jarvis.py's agentic loop
+
+    # ── Google Tasks
+    if name == "tasks_list":
+        from tools.google_tasks_tool import tasks_list
+        return tasks_list(inputs.get("max_results", 20))
+    if name == "tasks_create":
+        from tools.google_tasks_tool import tasks_create
+        return tasks_create(inputs["title"], inputs.get("due_date", ""), inputs.get("notes", ""))
+    if name == "tasks_complete":
+        from tools.google_tasks_tool import tasks_complete
+        return tasks_complete(inputs["task_id"])
+    if name == "tasks_today":
+        from tools.google_tasks_tool import tasks_today
+        return tasks_today()
+
+    # ── Google Contacts
+    if name == "contacts_search":
+        from tools.google_contacts_tool import contacts_search
+        return contacts_search(inputs["name"])
+    if name == "contacts_get_email":
+        from tools.google_contacts_tool import contacts_get_email
+        return contacts_get_email(inputs["name"])
+    if name == "contacts_list_frequent":
+        from tools.google_contacts_tool import contacts_list_frequent
+        return contacts_list_frequent()
+
+    # ── Google Drive
+    if name == "drive_search":
+        from tools.google_drive_tool import drive_search
+        return drive_search(inputs["query"], inputs.get("max_results", 8))
+    if name == "drive_read":
+        from tools.google_drive_tool import drive_read
+        return drive_read(inputs["file_id"])
+    if name == "drive_list_recent":
+        from tools.google_drive_tool import drive_list_recent
+        return drive_list_recent(inputs.get("days", 7))
+    if name == "drive_create_doc":
+        from tools.google_drive_tool import drive_create_doc
+        return drive_create_doc(inputs["title"], inputs["content"])
+
+    # ── Google Sheets
+    if name == "sheets_read":
+        from tools.google_sheets_tool import sheets_read
+        return sheets_read(inputs["spreadsheet_id"], inputs.get("range_", "Sheet1!A1:Z100"))
+    if name == "sheets_append":
+        from tools.google_sheets_tool import sheets_append
+        return sheets_append(inputs["spreadsheet_id"], inputs["values"], inputs.get("sheet_name", "Sheet1"))
+    if name == "sheets_create":
+        from tools.google_sheets_tool import sheets_create
+        return sheets_create(inputs["title"], inputs.get("headers"))
+
+    # ── YouTube
+    if name == "youtube_transcript":
+        from tools.youtube_tool import youtube_transcript
+        return youtube_transcript(inputs["url"])
+    if name == "youtube_summarise":
+        from tools.youtube_tool import youtube_summarise
+        return youtube_summarise(inputs["url"])
+
+    # ── Code
+    if name == "run_python":
+        from tools.code_tool import run_python
+        return run_python(inputs["code"], inputs.get("timeout", 15))
+
+    # ── GitHub
+    if name == "github_search":
+        from tools.github_tool import github_search
+        return github_search(inputs["query"], inputs.get("type_", "repositories"))
+    if name == "github_create_issue":
+        from tools.github_tool import github_create_issue
+        return github_create_issue(inputs["repo"], inputs["title"], inputs.get("body", ""))
+    if name == "github_my_repos":
+        from tools.github_tool import github_my_repos
+        return github_my_repos()
+
+    # ── Self-awareness
+    if name == "jarvis_status":
+        from agent.self_monitor import introspect
+        from tools.memory_tool import _store
+        return introspect(_store)
 
     # ── Gmail
     if name == "gmail_unread":

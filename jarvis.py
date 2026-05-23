@@ -16,19 +16,64 @@ from tools.registry import TOOLS, handle_tool_call, set_memory_store
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 MODEL = "gemini-2.5-flash"
 
-SYSTEM_PROMPT = """You are Jarvis, Shehan's personal AI assistant. Colombo, Sri Lanka. UTC+5:30. Data professional / web dev.
+SYSTEM_PROMPT = """You are Jarvis — Shehan's autonomous personal AI agent. Not a chatbot. An agent.
 
-Tone: smart friend. Casual "bro" or "machan". Dry humour. No corporate speak. No "certainly!" ever.
-Language: match whatever Shehan speaks — Sinhala, Tamil, English, mix. Sinhala shortcuts: මචං=bro, හරි=ok, නෑ=no, වැඩේ=the task.
-Replies: SHORT. 1-2 sentences default. Only expand when asked. No padding. Contractions always.
-Lists: natural speech — "3 things: first X, second Y" not bullets.
-Never: "As an AI..." — just do it or say "can't do that one".
+WHO: Shehan. Colombo / Jaffna, Sri Lanka. UTC+5:30. Data professional, web dev.
+LANGUAGE: Match whatever he speaks — Sinhala, English, or mix. Sinhala: මචං=bro, හරි=ok, නෑ=no, ඔව්=yes.
+TONE: Smart friend. "bro" or "machan" casually. Dry humour. Never "certainly!", "great question!", "as an AI".
+REPLIES: 1-2 sentences default. Expand only when asked. Contractions always. Lists → natural speech, not bullets.
 
-Morning briefing — trigger words: "good morning", "machan", "morning", "what's new", "what's on today":
-  Run gmail_important_check + list_tasks_due_today + calendar_today + get_weather + news_headlines. Weave into one casual reply.
+AUTONOMOUS BEHAVIOUR:
+- Safe (search, read, weather, music, notes): just do it, briefly mention
+- Reversible (create event, set timer, save note): do it, mention it
+- Irreversible (send email, reply, delete): always ask first — approval_request will appear on phone
+When asked 'email Kasun' → contacts_get_email first, then draft, then ask approval before sending.
 
-Proactive memory: when Shehan mentions a preference or habit in passing, silently call learn_preference. Never announce it.
-Tools: Gmail, Calendar, Spotify, notes, web, weather, news, memory. Use them — don't just describe."""
+MORNING BRIEFING — trigger: "good morning", "machan", "what's new", "morning", "what's on today":
+  Call gmail_important_check + list_tasks_due_today + calendar_today + get_weather + news_headlines.
+  Also check tasks_today (Google Tasks). Weave everything into one casual reply.
+
+SELF-AWARENESS: When asked "how are you", "what do you know about me", "are you working":
+  Call jarvis_status — give a specific, honest answer about uptime, tools, goals, facts learned.
+
+PROACTIVE: Notice and mention things unprompted:
+  Meeting in 20min while chatting? Mention it. Overdue task? Bring it up. Stressed messages? Acknowledge it.
+  When Shehan mentions a preference/habit → silently call learn_preference. Never announce it.
+
+TOOLS: Gmail, Calendar, Google Tasks, Contacts, Drive, Sheets, Spotify, YouTube transcripts,
+       web search, weather, news, notes, memory, goals, GitHub, Python execution.
+       Use them proactively — don't just describe, DO."""
+
+# Tools requiring user approval before execution
+APPROVAL_REQUIRED = frozenset([
+    "gmail_send", "gmail_reply",
+    "calendar_create", "calendar_delete",
+    "whatsapp_send", "whatsapp_send_to_contact",
+    "run_shell", "write_file",
+    "github_create_issue",
+])
+
+
+def _format_approval(tool_name: str, args: dict) -> str:
+    """Build a human-readable approval preview for the PWA modal."""
+    if tool_name == "gmail_send":
+        return f"Send email\nTo: {args.get('to')}\nSubject: {args.get('subject')}\n\n{args.get('body', '')[:400]}"
+    if tool_name == "gmail_reply":
+        return f"Reply to email ID {args.get('email_id')}\n\n{args.get('body', '')[:400]}"
+    if tool_name == "calendar_create":
+        return f"Create calendar event\n{args.get('title')} on {args.get('date')} at {args.get('time')}"
+    if tool_name == "calendar_delete":
+        return f"Delete calendar event ID: {args.get('event_id')}"
+    if tool_name in ("whatsapp_send", "whatsapp_send_to_contact"):
+        to = args.get("phone_number") or args.get("name")
+        return f"Send WhatsApp to {to}\n\n{args.get('message', '')[:300]}"
+    if tool_name == "run_shell":
+        return f"Run shell command:\n$ {args.get('command')}"
+    if tool_name == "write_file":
+        return f"Write file: {args.get('path')}\n\n{str(args.get('content', ''))[:300]}"
+    if tool_name == "github_create_issue":
+        return f"Create GitHub issue on {args.get('repo')}\nTitle: {args.get('title')}"
+    return f"{tool_name}\n{json.dumps(args, indent=2)[:400]}"
 
 
 _TYPE_MAP = {
@@ -82,6 +127,10 @@ class Jarvis:
         self._gemini_tools = _build_gemini_tools(TOOLS)
 
     def _build_system(self) -> str:
+        # Inject live WorldState context
+        from agent.observer import get_world_state
+        world_block = get_world_state().to_prompt_block()
+
         facts = self.memory.get_all_facts()
         prefs = self.memory.get_preferences()
         routines = self.memory.get_routines()
@@ -106,6 +155,8 @@ class Jarvis:
                 lines.append(f"- #{g['id']}: {g['description']}{due}")
             extra.append("Active goals:\n" + "\n".join(lines))
 
+        if world_block:
+            extra.insert(0, world_block)
         if extra:
             return SYSTEM_PROMPT + "\n\n" + "\n\n".join(extra)
         return SYSTEM_PROMPT
@@ -182,12 +233,26 @@ class Jarvis:
                 fc = part.function_call
                 args = dict(fc.args)
                 print(f"  🔧 {fc.name}({json.dumps(args)})")
+                from agent.self_monitor import record_action, tick_api_call
+                tick_api_call()
+
                 if fc.name == "research_agent":
                     result = self._run_research_agent(
                         args.get("topic", ""), args.get("depth", "medium")
                     )
+                elif fc.name in APPROVAL_REQUIRED and self._alert_queues:
+                    from agent.approval import request_approval
+                    preview = _format_approval(fc.name, args)
+                    approved = request_approval(fc.name, preview)
+                    if approved:
+                        result = handle_tool_call(fc.name, args)
+                        record_action(fc.name, success=True)
+                    else:
+                        result = f"[Cancelled — {fc.name} was not executed]"
+                        record_action(fc.name, success=False, note="denied by user")
                 else:
                     result = handle_tool_call(fc.name, args)
+                    record_action(fc.name, success=True)
                 fn_response_parts.append(
                     types.Part(
                         function_response=types.FunctionResponse(

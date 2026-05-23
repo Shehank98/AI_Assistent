@@ -19,10 +19,23 @@ from pathlib import Path
 TOKEN_PATH = Path.home() / ".jarvis" / "gmail_token.json"
 
 SCOPES = [
+    # Gmail
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.send",
     "https://www.googleapis.com/auth/gmail.modify",
+    # Calendar
     "https://www.googleapis.com/auth/calendar",
+    # Tasks
+    "https://www.googleapis.com/auth/tasks",
+    # Contacts (People API)
+    "https://www.googleapis.com/auth/contacts.readonly",
+    # Drive (read any file + create/modify files Jarvis creates)
+    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/drive.file",
+    # Sheets
+    "https://www.googleapis.com/auth/spreadsheets",
+    # YouTube read-only (subscription list)
+    "https://www.googleapis.com/auth/youtube.readonly",
 ]
 
 

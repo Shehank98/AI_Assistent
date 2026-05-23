@@ -59,6 +59,14 @@ const jarvisAvatar    = document.getElementById('jarvis-avatar');
 const tokenInput      = document.getElementById('token-input');
 const stopBtn         = document.getElementById('stop-btn');
 
+// Approval modal DOM
+const approvalOverlay  = document.getElementById('approval-overlay');
+const approvalAction   = document.getElementById('approval-action');
+const approvalPreview  = document.getElementById('approval-preview');
+const approvalTimerFill= document.getElementById('approval-timer-fill');
+const approvalApprove  = document.getElementById('approval-approve');
+const approvalDeny     = document.getElementById('approval-deny');
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 ttsToggle.checked = ttsEnabled;
 continuousToggle.checked = continuousMode;
@@ -131,6 +139,9 @@ function connectWS() {
           setVoiceState('idle');
         }
       }
+
+    } else if (data.type === 'approval_request') {
+      showApproval(data);
 
     } else if (data.type === 'alert') {
       hideThinking();
@@ -605,6 +616,73 @@ function showMicPermissionBanner() {
     setTimeout(() => banner.remove(), 300);
   }, 8000);
 }
+
+// ── Approval modal ────────────────────────────────────────────────────────────
+let _approvalId = null;
+let _approvalTimeout = null;
+let _approvalAnimStart = null;
+let _approvalAnimId = null;
+
+function showApproval(data) {
+  _approvalId = data.approval_id;
+  const timeoutSec = data.timeout_seconds || 30;
+
+  approvalAction.textContent = data.action || 'Confirm action';
+  approvalPreview.textContent = data.preview || '';
+
+  // Reset timer bar
+  approvalTimerFill.style.transition = 'none';
+  approvalTimerFill.style.transform = 'scaleX(1)';
+
+  approvalOverlay.classList.remove('hidden');
+  void approvalOverlay.offsetWidth; // force reflow so transition fires
+
+  // Animate bar shrinking from 1 → 0 over timeoutSec seconds
+  requestAnimationFrame(() => {
+    approvalTimerFill.style.transition = `transform ${timeoutSec}s linear`;
+    approvalTimerFill.style.transform = 'scaleX(0)';
+  });
+
+  // Auto-deny on timeout
+  clearTimeout(_approvalTimeout);
+  _approvalTimeout = setTimeout(() => {
+    _sendApprovalResponse(false);
+    hideApproval();
+  }, timeoutSec * 1000);
+
+  if (ttsEnabled) speakText(`Approval needed: ${data.action}`);
+}
+
+function hideApproval() {
+  clearTimeout(_approvalTimeout);
+  _approvalTimeout = null;
+  _approvalId = null;
+  approvalOverlay.classList.add('hidden');
+  approvalTimerFill.style.transition = 'none';
+  approvalTimerFill.style.transform = 'scaleX(1)';
+}
+
+function _sendApprovalResponse(granted) {
+  if (!_approvalId) return;
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      type: 'approval_response',
+      approval_id: _approvalId,
+      granted,
+    }));
+  }
+}
+
+approvalApprove.addEventListener('click', () => {
+  _sendApprovalResponse(true);
+  hideApproval();
+  navigator.vibrate?.([30, 20, 30]);
+});
+
+approvalDeny.addEventListener('click', () => {
+  _sendApprovalResponse(false);
+  hideApproval();
+});
 
 // ── Status dot ────────────────────────────────────────────────────────────────
 function setDot(state) {

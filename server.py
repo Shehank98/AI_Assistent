@@ -95,11 +95,13 @@ def get_jarvis() -> Jarvis:
     return _jarvis
 
 
-def _broadcast_alert(message: str):
+def _broadcast_alert(message):
+    """Broadcast alert or dict payload to all connected WS clients."""
+    payload = message if isinstance(message, dict) else {"type": "alert", "content": message}
     dead = set()
     for q in _ws_clients:
         try:
-            q.put_nowait({"type": "alert", "content": message})
+            q.put_nowait(payload)
         except Exception:
             dead.add(q)
     _ws_clients.difference_update(dead)
@@ -131,8 +133,19 @@ async def startup():
     try:
         j = get_jarvis()
         j._alert_queues = _ws_clients
+
+        # Wire approval broadcast
+        from agent.approval import set_broadcast as _set_approval_broadcast
+        _set_approval_broadcast(_broadcast_alert)
+
+        # Start background scheduler (proactive checks, routines, world state)
         from agent.scheduler import setup_scheduler
         setup_scheduler(j)
+
+        # Kick off first world-state build
+        from agent.observer import refresh_world_state
+        asyncio.create_task(refresh_world_state(j.memory))
+
     except ValueError as exc:
         print(f"\n{'='*60}\n⚠️  JARVIS NOT READY\n{exc}\n{'='*60}\n")
 
@@ -195,6 +208,27 @@ async def get_conversation():
         if text_parts:
             turns.append({"role": role, "text": " ".join(text_parts)})
     return {"turns": turns, "count": len(turns)}
+
+
+@app.get("/api/agent/status")
+async def agent_status():
+    """WorldState + self-monitor health — used by the settings panel."""
+    from agent.observer import get_world_state
+    from agent.self_monitor import health_check
+    j = get_jarvis()
+    ws = get_world_state()
+    health = health_check(j.memory)
+    return {
+        "world_state": {
+            "built_at": ws.built_at.isoformat() if ws.built_at else None,
+            "time_of_day": ws.time_of_day,
+            "weather": ws.weather,
+            "upcoming_events": ws.upcoming_events,
+            "tasks_due_today": ws.tasks_due_today,
+            "active_goals": [g["description"] for g in ws.active_goals],
+        },
+        "health": health,
+    }
 
 
 @app.get("/api/goals")
@@ -390,9 +424,17 @@ async def websocket_endpoint(websocket: WebSocket, token: str = ""):
     try:
         while True:
             data = await websocket.receive_json()
+
+            # Approval response (from PWA modal)
+            if data.get("type") == "approval_response":
+                from agent.approval import respond_approval
+                respond_approval(data.get("approval_id", ""), bool(data.get("granted", False)))
+                continue
+
             message = (data.get("message") or data.get("content") or "").strip()
             if not message:
                 continue
+
             await websocket.send_json({"type": "thinking"})
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(None, jarvis.chat, message, True)
@@ -401,6 +443,17 @@ async def websocket_endpoint(websocket: WebSocket, token: str = ""):
                 "content": response,
                 "turns": len(jarvis.conversation) // 2,
             })
+
+            # Background: silent memory extraction (no latency impact)
+            async def _extract(u=message, r=response):
+                try:
+                    from agent.memory_engine import extract_from_conversation
+                    await loop.run_in_executor(
+                        None, extract_from_conversation, u, r, jarvis._client, jarvis.memory
+                    )
+                except Exception:
+                    pass
+            asyncio.create_task(_extract())
     except WebSocketDisconnect:
         pass
     except Exception as e:

@@ -40,6 +40,9 @@ trafilatura>=1.8.0
 # YouTube search (no API key needed)
 # youtube-search-python>=1.6.6   # install with: pip install youtube-search-python
 
+# YouTube transcript extraction (no API key needed)
+youtube-transcript-api>=0.6.2
+
 # WhatsApp (desktop only — requires WhatsApp Web in browser)
 # pywhatkit>=5.4
 
