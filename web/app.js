@@ -12,6 +12,7 @@ let wsRetry = 0;
 let wsReconnectTimer = null;
 let recognition = null;
 let voiceState = 'idle';  // idle | listening | processing | speaking
+let _ignoreNextResponse = false;
 let continuousMode = localStorage.getItem('continuousMode') !== 'false'; // default ON
 let ttsEnabled = localStorage.getItem('tts') === 'true';
 let useServerSTT = localStorage.getItem('useServerSTT') === 'true'; // default OFF
@@ -56,6 +57,7 @@ const alertText       = document.getElementById('alert-text');
 const alertClose      = document.getElementById('alert-close');
 const jarvisAvatar    = document.getElementById('jarvis-avatar');
 const tokenInput      = document.getElementById('token-input');
+const stopBtn         = document.getElementById('stop-btn');
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 ttsToggle.checked = ttsEnabled;
@@ -114,6 +116,7 @@ function connectWS() {
     } else if (data.type === 'response') {
       hideThinking();
       setDot('online');
+      if (_ignoreNextResponse) { _ignoreNextResponse = false; setVoiceState(continuousMode ? 'listening' : 'idle'); if (continuousMode) startListening(); return; }
       const text = data.content || data.message || '';
       appendMessage('jarvis', text);
       navigator.vibrate?.([50, 50, 50]);
@@ -229,13 +232,15 @@ function renderMarkdown(text) {
 function setVoiceState(state) {
   voiceState = state;
 
-  // Clear ring classes
+  // Show/hide stop button
+  if (stopBtn) stopBtn.style.display = (state === 'processing' || state === 'speaking') ? 'flex' : 'none';
+
   micRing.className = 'mic-ring';
   jarvisAvatar.className = 'avatar';
 
   switch (state) {
     case 'idle':
-      voiceStatus.textContent = continuousMode ? 'Tap mic or speak' : 'Tap to speak';
+      voiceStatus.textContent = '';
       stopWaveform();
       break;
 
@@ -277,7 +282,7 @@ function initSpeechRecognition() {
   recognition = new SR();
   recognition.continuous = false;
   recognition.interimResults = true;
-  recognition.lang = '';  // auto-detect — handles Sinhala, Tamil, English
+  recognition.lang = navigator.language || 'en';  // use device locale (handles Sinhala/Tamil if set)
 
   recognition.onstart = () => {
     setVoiceState('listening');
@@ -290,12 +295,11 @@ function initSpeechRecognition() {
       else interim += r[0].transcript;
     }
 
-    // Show interim in textarea as grey ghost text
+    // Show interim in textarea
     if (interim && !final) {
       textInput.value = interim;
       textInput.classList.add('interim');
-      textInput.style.height = 'auto';
-      textInput.style.height = Math.min(textInput.scrollHeight, 130) + 'px';
+      resetTextareaHeight();
     }
 
     if (final) {
@@ -748,6 +752,23 @@ async function fetchStatus() {
 // ── Input events ──────────────────────────────────────────────────────────────
 sendBtn.addEventListener('click', () => sendMessage(textInput.value));
 micBtn.addEventListener('click', toggleListening);
+
+if (stopBtn) {
+  stopBtn.addEventListener('click', () => {
+    // Interrupt TTS immediately
+    window.speechSynthesis?.cancel();
+    currentUtterance = null;
+    // Discard the in-flight Jarvis response (arrives from WS after we interrupt)
+    _ignoreNextResponse = voiceState === 'processing';
+    hideThinking();
+    setDot('online');
+    if (continuousMode && !useServerSTT) {
+      setTimeout(() => startListening(), 200);
+    } else {
+      setVoiceState('idle');
+    }
+  });
+}
 
 textInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
