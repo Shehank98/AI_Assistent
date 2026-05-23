@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0a0a0f">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Jarvis">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="stylesheet" href="/style.css">
+  <title>Jarvis</title>
+</head>
+<body>
+  <header>
+    <div id="status-dot" class="dot offline" title="Connecting..."></div>
+    <h1>J.A.R.V.I.S</h1>
+    <div class="header-actions">
+      <button id="tts-btn" class="icon-btn" title="Toggle voice responses">🔊</button>
+      <button id="clear-btn" class="icon-btn" title="Clear conversation">↺</button>
+    </div>
+  </header>
+
+  <main id="conversation">
+    <div class="message jarvis welcome">
+      Online and ready, sir. How can I assist you today?
+    </div>
+  </main>
+
+  <footer>
+    <div id="input-row">
+      <textarea
+        id="text-input"
+        placeholder="Ask Jarvis..."
+        rows="1"
+        autocomplete="off"
+        autocorrect="on"
+        spellcheck="true"
+      ></textarea>
+      <button id="mic-btn" class="icon-btn" title="Voice input">🎤</button>
+      <button id="send-btn" class="send-btn" title="Send">▶</button>
+    </div>
+    <div id="voice-status"></div>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>

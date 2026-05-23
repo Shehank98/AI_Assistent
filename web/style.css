@@ -1,0 +1,260 @@
+/* Jarvis — dark HUD theme */
+:root {
+  --bg: #0a0a0f;
+  --surface: #111118;
+  --surface2: #16161f;
+  --accent: #00d4ff;
+  --accent-dim: rgba(0, 212, 255, 0.15);
+  --accent-border: rgba(0, 212, 255, 0.25);
+  --text: #e8e8f0;
+  --text-dim: #55556a;
+  --user-bg: #1a2535;
+  --jarvis-bg: #111118;
+  --radius: 18px;
+  --radius-sm: 8px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  overflow: hidden;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh; /* dynamic viewport — accounts for mobile keyboard */
+}
+
+/* ── Header ──────────────────────────────────────────── */
+header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--accent-border);
+  flex-shrink: 0;
+  padding-top: calc(14px + env(safe-area-inset-top, 0px));
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: background 0.3s;
+}
+
+.dot.online  { background: #00ff88; box-shadow: 0 0 6px #00ff88; }
+.dot.offline { background: #ff3344; }
+.dot.thinking { background: var(--accent); animation: pulse 1s ease-in-out infinite; }
+
+header h1 {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  color: var(--accent);
+  text-shadow: 0 0 12px rgba(0, 212, 255, 0.5);
+}
+
+.header-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.icon-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  transition: color 0.2s, background 0.2s;
+}
+
+.icon-btn:hover, .icon-btn:active {
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.icon-btn.active {
+  color: var(--accent);
+}
+
+/* ── Conversation ─────────────────────────────────────── */
+main {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
+.message {
+  max-width: 88%;
+  padding: 11px 15px;
+  border-radius: var(--radius);
+  line-height: 1.55;
+  word-break: break-word;
+  font-size: 15px;
+  white-space: pre-wrap;
+}
+
+.message.user {
+  align-self: flex-end;
+  background: var(--user-bg);
+  border: 1px solid var(--accent-border);
+  border-bottom-right-radius: 4px;
+  color: var(--text);
+}
+
+.message.jarvis {
+  align-self: flex-start;
+  background: var(--jarvis-bg);
+  border: 1px solid rgba(0, 212, 255, 0.1);
+  border-bottom-left-radius: 4px;
+  color: var(--text);
+}
+
+.message.welcome {
+  color: var(--accent);
+  font-style: italic;
+  border-color: var(--accent-border);
+}
+
+.message.thinking {
+  align-self: flex-start;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-style: italic;
+  font-size: 14px;
+  padding: 4px 0;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.message.error {
+  align-self: flex-start;
+  background: rgba(255, 51, 68, 0.1);
+  border: 1px solid rgba(255, 51, 68, 0.3);
+  color: #ff6677;
+  font-size: 13px;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.35; }
+  50%       { opacity: 1; }
+}
+
+/* ── Footer / Input ───────────────────────────────────── */
+footer {
+  flex-shrink: 0;
+  background: var(--surface);
+  border-top: 1px solid var(--accent-border);
+  padding: 10px 12px;
+  padding-bottom: calc(10px + var(--safe-bottom));
+}
+
+#input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+#text-input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--accent-border);
+  border-radius: 14px;
+  color: var(--text);
+  padding: 10px 14px;
+  font-size: 16px; /* 16px prevents iOS zoom */
+  font-family: inherit;
+  line-height: 1.4;
+  resize: none;
+  max-height: 120px;
+  overflow-y: auto;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+#text-input:focus {
+  border-color: var(--accent);
+}
+
+#text-input::placeholder {
+  color: var(--text-dim);
+}
+
+#mic-btn {
+  font-size: 20px;
+  padding: 8px;
+  border-radius: 50%;
+  width: 42px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.2s, box-shadow 0.2s;
+}
+
+#mic-btn.listening {
+  color: #ff3344;
+  background: rgba(255, 51, 68, 0.15);
+  box-shadow: 0 0 0 3px rgba(255, 51, 68, 0.3);
+  animation: pulse 0.9s ease-in-out infinite;
+}
+
+.send-btn {
+  background: var(--accent);
+  color: #000;
+  border: none;
+  border-radius: 50%;
+  width: 42px;
+  height: 42px;
+  font-size: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.2s, transform 0.1s;
+  font-weight: bold;
+}
+
+.send-btn:active {
+  transform: scale(0.92);
+  opacity: 0.85;
+}
+
+#voice-status {
+  font-size: 12px;
+  color: var(--text-dim);
+  text-align: center;
+  margin-top: 4px;
+  min-height: 16px;
+  font-style: italic;
+}
+
+/* ── Scrollbar ────────────────────────────────────────── */
+main::-webkit-scrollbar { width: 4px; }
+main::-webkit-scrollbar-track { background: transparent; }
+main::-webkit-scrollbar-thumb { background: var(--accent-dim); border-radius: 2px; }

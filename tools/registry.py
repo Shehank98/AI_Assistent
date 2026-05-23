@@ -114,6 +114,46 @@ TOOLS = [
             "required": ["url"],
         },
     },
+    {
+        "name": "set_timer",
+        "description": "Set a countdown timer that will alert you when it expires.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "duration_seconds": {"type": "integer", "description": "Duration in seconds"},
+                "label": {"type": "string", "description": "What the timer is for (e.g. 'tea', 'meeting')"},
+            },
+            "required": ["duration_seconds"],
+        },
+    },
+    {
+        "name": "create_note",
+        "description": "Save a note as a markdown file in ~/Notes/.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Note title"},
+                "content": {"type": "string", "description": "Note content"},
+            },
+            "required": ["title", "content"],
+        },
+    },
+    {
+        "name": "list_notes",
+        "description": "List all saved notes.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "read_note",
+        "description": "Read the contents of a saved note by title.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Note title (partial match ok)"}
+            },
+            "required": ["title"],
+        },
+    },
 ]
 
 
@@ -218,6 +258,61 @@ def _open_url(url: str) -> str:
         return f"Error: {e}"
 
 
+NOTES_DIR = Path.home() / "Notes"
+
+
+def _set_timer(duration_seconds: int, label: str = "Timer") -> str:
+    import threading
+    def _ring():
+        print(f"\n[TIMER] ⏰ {label} — done!")
+        try:
+            from voice.tts import speak
+            speak(f"{label} is done, sir.", voice=True)
+        except Exception:
+            pass
+    t = threading.Timer(duration_seconds, _ring)
+    t.daemon = True
+    t.start()
+    mins, secs = divmod(duration_seconds, 60)
+    time_str = f"{mins}m {secs}s" if mins else f"{secs}s"
+    return f"Timer set: '{label}' fires in {time_str}."
+
+
+def _create_note(title: str, content: str) -> str:
+    try:
+        NOTES_DIR.mkdir(parents=True, exist_ok=True)
+        filename = title.lower().replace(" ", "_").replace("/", "-") + ".md"
+        path = NOTES_DIR / filename
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        path.write_text(f"# {title}\n_Created: {timestamp}_\n\n{content}\n", encoding="utf-8")
+        return f"Note saved: {path}"
+    except Exception as e:
+        return f"Error saving note: {e}"
+
+
+def _list_notes() -> str:
+    NOTES_DIR.mkdir(parents=True, exist_ok=True)
+    notes = sorted(NOTES_DIR.glob("*.md"))
+    if not notes:
+        return "No notes found."
+    return "\n".join(f"• {n.stem.replace('_', ' ')}" for n in notes)
+
+
+def _read_note(title: str) -> str:
+    slug = title.lower().replace(" ", "_")
+    path = NOTES_DIR / (slug + ".md")
+    if not path.exists():
+        matches = list(NOTES_DIR.glob(f"*{slug}*.md"))
+        if matches:
+            path = matches[0]
+        else:
+            return f"Note '{title}' not found. Use list_notes to see available notes."
+    try:
+        return path.read_text(encoding="utf-8")
+    except Exception as e:
+        return f"Error reading note: {e}"
+
+
 # Memory backed by the MemoryStore imported in jarvis.py
 # These are shims that the dispatcher calls; memory object passed in separately.
 _memory_store = None
@@ -249,6 +344,10 @@ TOOL_MAP = {
     "open_url": lambda inp: _open_url(inp["url"]),
     "remember_fact": lambda inp: _remember_fact(inp["key"], inp["value"]),
     "recall_facts": lambda inp: _recall_facts(),
+    "set_timer": lambda inp: _set_timer(inp["duration_seconds"], inp.get("label", "Timer")),
+    "create_note": lambda inp: _create_note(inp["title"], inp["content"]),
+    "list_notes": lambda inp: _list_notes(),
+    "read_note": lambda inp: _read_note(inp["title"]),
 }
 
 

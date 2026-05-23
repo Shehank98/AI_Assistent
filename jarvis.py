@@ -8,12 +8,12 @@ import json
 import anthropic
 from voice.stt import listen
 from voice.tts import speak
-from tools.registry import TOOLS, handle_tool_call
+from tools.registry import TOOLS, handle_tool_call, set_memory_store
 from memory.store import MemoryStore
 
 # ── Config ────────────────────────────────────────────────────────────────────
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-MODEL = "claude-sonnet-4-5"
+MODEL = "claude-sonnet-4-6"
 MAX_TOKENS = 1024
 
 SYSTEM_PROMPT = """You are Jarvis, a personal AI assistant. You are sharp, concise, 
@@ -32,6 +32,7 @@ class Jarvis:
     def __init__(self, voice_mode=False):
         self.client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         self.memory = MemoryStore()
+        set_memory_store(self.memory)
         self.conversation: list[dict] = []
         self.voice_mode = voice_mode
 
@@ -80,11 +81,13 @@ class Jarvis:
             if tool_results:
                 self.conversation.append({"role": "user", "content": tool_results})
 
-    def chat(self, user_input: str) -> str:
-        """Process one turn (text or voice)."""
-        print(f"\n[You] {user_input}")
+    def chat(self, user_input: str, silent: bool = False) -> str:
+        """Process one turn (text or voice). silent=True suppresses prints (for API use)."""
+        if not silent:
+            print(f"\n[You] {user_input}")
         response = self._run_agentic_loop(user_input)
-        print(f"[Jarvis] {response}\n")
+        if not silent:
+            print(f"[Jarvis] {response}\n")
         return response
 
     def run_text_loop(self):
