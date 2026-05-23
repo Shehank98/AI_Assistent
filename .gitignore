@@ -10,8 +10,18 @@ build/
 venv/
 env/
 
-# Environment / secrets
+# Environment / secrets — NEVER commit these
 .env
+*.env
+
+# OAuth credentials and tokens — NEVER commit these
+client_secret.json
+*_token.json
+auth/*.json
+
+# Jarvis local data (contains encrypted personal data)
+# ~/.jarvis/ is outside the repo, but just in case
+.jarvis/
 
 # Editor
 .vscode/

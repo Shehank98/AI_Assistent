@@ -5,6 +5,8 @@ Single worker, single Jarvis instance (shared state across connections).
 """
 
 import asyncio
+import io
+import logging
 import os
 import time
 from pathlib import Path
@@ -12,8 +14,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Header
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -24,10 +26,42 @@ app = FastAPI(title="Jarvis", docs_url=None, redoc_url=None)
 _jarvis: Jarvis | None = None
 _start_time = time.time()
 _ws_clients: set[asyncio.Queue] = set()
-
-
 _init_error: str = ""
 
+JARVIS_ACCESS_TOKEN = os.environ.get("JARVIS_ACCESS_TOKEN", "")
+PRIVACY_MODE = os.environ.get("PRIVACY_MODE", "false").lower() == "true"
+ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
+ELEVENLABS_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "pNInz6obpgDQGcFmaJgB")  # Adam
+
+
+# ── Suppress access logs for chat/ws routes (contain conversation content) ─────
+
+class _SuppressChatLog(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        return "/api/chat" not in msg and " /ws" not in msg
+
+logging.getLogger("uvicorn.access").addFilter(_SuppressChatLog())
+
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
+
+def _check_token(token: str) -> bool:
+    if not JARVIS_ACCESS_TOKEN:
+        return True
+    return token == JARVIS_ACCESS_TOKEN
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    if request.url.path.startswith("/api/"):
+        token = request.headers.get("X-Jarvis-Token", "")
+        if not _check_token(token):
+            return JSONResponse({"error": "Unauthorized — set X-Jarvis-Token header"}, status_code=401)
+    return await call_next(request)
+
+
+# ── Jarvis instance ───────────────────────────────────────────────────────────
 
 def get_jarvis() -> Jarvis:
     global _jarvis, _init_error
@@ -44,7 +78,6 @@ def get_jarvis() -> Jarvis:
 
 
 def _broadcast_alert(message: str):
-    """Push an alert message to all connected WebSocket clients."""
     dead = set()
     for q in _ws_clients:
         try:
@@ -54,28 +87,7 @@ def _broadcast_alert(message: str):
     _ws_clients.difference_update(dead)
 
 
-# ── Startup / Proactive Check ──────────────────────────────────────────────────
-
-@app.on_event("startup")
-async def startup():
-    try:
-        j = get_jarvis()
-        j._alert_queues = _ws_clients  # type: ignore[assignment]
-        asyncio.create_task(j.proactive_check())
-    except ValueError as exc:
-        # Missing API key — server still starts so Railway health check passes.
-        # Every API call will return a 503 with the setup instructions.
-        print(f"\n{'='*60}\n⚠️  JARVIS NOT READY\n{exc}\n{'='*60}\n")
-
-
-# ── REST Endpoints ─────────────────────────────────────────────────────────────
-
-class ChatRequest(BaseModel):
-    message: str
-
-
 def _jarvis_or_503():
-    """Return Jarvis instance or raise 503 with setup instructions."""
     try:
         return get_jarvis()
     except ValueError:
@@ -84,6 +96,36 @@ def _jarvis_or_503():
             status_code=503,
             detail=_init_error or "GEMINI_API_KEY not set. Add it in Railway → Variables.",
         )
+
+
+# ── Startup ───────────────────────────────────────────────────────────────────
+
+@app.on_event("startup")
+async def startup():
+    if JARVIS_ACCESS_TOKEN:
+        print(f"\n{'='*60}\n🔒 Auth enabled — X-Jarvis-Token required on all /api/* routes\n{'='*60}\n")
+    else:
+        print(f"\n{'='*60}\n⚠️  No JARVIS_ACCESS_TOKEN set — API is open. Set it in Railway Variables.\n{'='*60}\n")
+
+    if PRIVACY_MODE:
+        print("[Jarvis] PRIVACY_MODE=true — email bodies will not be sent to Gemini API")
+
+    try:
+        j = get_jarvis()
+        j._alert_queues = _ws_clients
+        asyncio.create_task(j.proactive_check())
+    except ValueError as exc:
+        print(f"\n{'='*60}\n⚠️  JARVIS NOT READY\n{exc}\n{'='*60}\n")
+
+
+# ── REST Endpoints ────────────────────────────────────────────────────────────
+
+class ChatRequest(BaseModel):
+    message: str
+
+
+class TTSRequest(BaseModel):
+    text: str
 
 
 @app.post("/api/chat")
@@ -113,6 +155,8 @@ async def status():
         "conversation_turns": len(j.conversation) // 2,
         "uptime": f"{h}h {m}m {s}s",
         "connected_clients": len(_ws_clients),
+        "privacy_mode": PRIVACY_MODE,
+        "auth_enabled": bool(JARVIS_ACCESS_TOKEN),
     }
 
 
@@ -122,10 +166,117 @@ async def clear_conversation():
     return {"cleared": True}
 
 
+@app.get("/api/conversation")
+async def get_conversation():
+    j = get_jarvis()
+    turns = []
+    for c in j.conversation:
+        role = c.role
+        text_parts = [p.text for p in c.parts if p.text is not None]
+        if text_parts:
+            turns.append({"role": role, "text": " ".join(text_parts)})
+    return {"turns": turns, "count": len(turns)}
+
+
 @app.get("/api/memory")
 async def get_memory():
+    if JARVIS_ACCESS_TOKEN == "" and not os.environ.get("JARVIS_ACCESS_TOKEN"):
+        return JSONResponse({"error": "JARVIS_ACCESS_TOKEN not set — /api/memory is disabled"}, status_code=503)
     facts = get_jarvis().memory.get_all_facts()
     return {"facts": facts, "count": len(facts)}
+
+
+@app.post("/api/tts")
+async def tts_endpoint(req: TTSRequest):
+    if not ELEVENLABS_API_KEY:
+        raise_503 = True
+        try:
+            import urllib.request
+        except ImportError:
+            pass
+        from fastapi import HTTPException
+        raise HTTPException(status_code=503, detail="ElevenLabs API key not configured. Set ELEVENLABS_API_KEY.")
+
+    text = req.text.strip()
+    if not text:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Empty text")
+
+    # Strip markdown for TTS
+    import re
+    text = re.sub(r'```[\s\S]*?```', '', text)
+    text = re.sub(r'`[^`]+`', '', text)
+    text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
+    text = re.sub(r'https?://\S+', 'the link', text)
+    text = re.sub(r'[*_#]', '', text)
+    text = re.sub(r'\n+', ' ', text).strip()
+
+    import json as _json
+    import urllib.request
+
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}/stream"
+    payload = _json.dumps({
+        "text": text,
+        "model_id": "eleven_monolingual_v1",
+        "voice_settings": {
+            "stability": 0.5,
+            "similarity_boost": 0.8,
+            "style": 0.2,
+            "use_speaker_boost": True,
+        },
+    }).encode()
+
+    headers = {
+        "xi-api-key": ELEVENLABS_API_KEY,
+        "Content-Type": "application/json",
+        "Accept": "audio/mpeg",
+    }
+
+    try:
+        req_obj = urllib.request.Request(url, data=payload, headers=headers)
+        with urllib.request.urlopen(req_obj, timeout=20) as resp:
+            audio_data = resp.read()
+        return StreamingResponse(
+            io.BytesIO(audio_data),
+            media_type="audio/mpeg",
+            headers={"Content-Disposition": "inline; filename=response.mp3"},
+        )
+    except Exception as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=502, detail=f"ElevenLabs error: {e}")
+
+
+@app.post("/api/stt")
+async def stt_endpoint(request: Request):
+    try:
+        import whisper as _whisper
+    except ImportError:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=503, detail="Whisper not installed. Run: pip install openai-whisper")
+
+    import tempfile
+    body = await request.body()
+    content_type = request.headers.get("content-type", "audio/webm")
+    suffix = ".webm" if "webm" in content_type else ".wav"
+
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+        f.write(body)
+        tmp_path = f.name
+
+    try:
+        loop = asyncio.get_event_loop()
+        model = await loop.run_in_executor(None, _whisper.load_model, "base")
+        result = await loop.run_in_executor(None, model.transcribe, tmp_path)
+        return {"transcript": result["text"].strip()}
+    except Exception as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=f"Whisper error: {e}")
+    finally:
+        import os as _os
+        try:
+            _os.unlink(tmp_path)
+        except Exception:
+            pass
 
 
 # ── Google OAuth callback ─────────────────────────────────────────────────────
@@ -155,15 +306,19 @@ async def spotify_oauth_callback(code: str = "", error: str = ""):
 # ── WebSocket ─────────────────────────────────────────────────────────────────
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(websocket: WebSocket, token: str = ""):
+    if JARVIS_ACCESS_TOKEN and not _check_token(token):
+        await websocket.close(code=4001, reason="Unauthorized")
+        return
+
     await websocket.accept()
+
     if _init_error:
         await websocket.send_json({"type": "error", "content": _init_error})
         await websocket.close()
         return
-    jarvis = get_jarvis()
 
-    # Register this client's alert queue
+    jarvis = get_jarvis()
     q: asyncio.Queue = asyncio.Queue()
     _ws_clients.add(q)
 
@@ -185,9 +340,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 continue
             await websocket.send_json({"type": "thinking"})
             loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None, jarvis.chat, message, True
-            )
+            response = await loop.run_in_executor(None, jarvis.chat, message, True)
             await websocket.send_json({
                 "type": "response",
                 "content": response,

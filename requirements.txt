@@ -8,7 +8,11 @@ google-genai>=1.0.0
 fastapi>=0.111.0
 uvicorn[standard]>=0.29.0
 aiofiles>=23.2.0
+python-multipart>=0.0.9
 python-dotenv>=1.0.0
+
+# Encryption at rest (memory store)
+cryptography>=42.0.0
 
 # Google (Gmail + Calendar)
 google-auth>=2.29.0

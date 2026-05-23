@@ -1,6 +1,6 @@
 """
 tools/registry.py — Central tool registry for Jarvis.
-All tools exposed to Claude are defined and dispatched here.
+All tools exposed to Gemini are defined and dispatched here.
 Desktop-only tools are excluded when DESKTOP_MODE != "true".
 """
 
@@ -8,25 +8,21 @@ import os
 
 DESKTOP_MODE = os.environ.get("DESKTOP_MODE", "false").lower() == "true"
 
-# ── Memory store wiring ────────────────────────────────────────────────────────
 _memory_store = None
 
 
 def set_memory_store(store):
-    """Called by Jarvis.__init__ to wire the memory store to all memory tools."""
     global _memory_store
     _memory_store = store
     from tools.memory_tool import set_store
     set_store(store)
 
 
-# ── Tool Definitions ───────────────────────────────────────────────────────────
-
 _TOOLS_BASE = [
     # ── Web / Search ──────────────────────────────────────────────────────────
     {
         "name": "web_search",
-        "description": "Search the web using DuckDuckGo. Returns instant answers and related topics.",
+        "description": "Search the web using DuckDuckGo.",
         "input_schema": {
             "type": "object",
             "properties": {"query": {"type": "string"}},
@@ -38,13 +34,13 @@ _TOOLS_BASE = [
         "description": "Fetch and extract readable text from any URL.",
         "input_schema": {
             "type": "object",
-            "properties": {"url": {"type": "string", "description": "Full URL to fetch"}},
+            "properties": {"url": {"type": "string"}},
             "required": ["url"],
         },
     },
     {
         "name": "youtube_search",
-        "description": "Search YouTube and return top 3 results with titles and links.",
+        "description": "Search YouTube and return top 3 results.",
         "input_schema": {
             "type": "object",
             "properties": {"query": {"type": "string"}},
@@ -53,7 +49,7 @@ _TOOLS_BASE = [
     },
     {
         "name": "wikipedia",
-        "description": "Get a Wikipedia summary for a topic or person.",
+        "description": "Get a Wikipedia summary for a topic.",
         "input_schema": {
             "type": "object",
             "properties": {"query": {"type": "string"}},
@@ -64,10 +60,10 @@ _TOOLS_BASE = [
     # ── System / Utilities ────────────────────────────────────────────────────
     {
         "name": "get_weather",
-        "description": "Get current weather for a city. Defaults to JARVIS_LOCATION if city not given.",
+        "description": "Get current weather for a city. Defaults to JARVIS_LOCATION.",
         "input_schema": {
             "type": "object",
-            "properties": {"city": {"type": "string", "description": "City name (optional)"}},
+            "properties": {"city": {"type": "string"}},
             "required": [],
         },
     },
@@ -78,19 +74,19 @@ _TOOLS_BASE = [
     },
     {
         "name": "set_timer",
-        "description": "Set a countdown timer that alerts when time is up.",
+        "description": "Set a countdown timer that alerts when done.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "duration_seconds": {"type": "integer", "description": "Duration in seconds"},
-                "label": {"type": "string", "description": "What the timer is for"},
+                "duration_seconds": {"type": "integer"},
+                "label": {"type": "string"},
             },
             "required": ["duration_seconds"],
         },
     },
     {
         "name": "create_note",
-        "description": "Save a note to ~/Notes/ as a markdown file.",
+        "description": "Save a note to ~/Notes/ as markdown.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -116,10 +112,10 @@ _TOOLS_BASE = [
     },
     {
         "name": "read_file",
-        "description": "Read the contents of a file from disk.",
+        "description": "Read contents of a file from disk.",
         "input_schema": {
             "type": "object",
-            "properties": {"path": {"type": "string", "description": "File path"}},
+            "properties": {"path": {"type": "string"}},
             "required": ["path"],
         },
     },
@@ -140,7 +136,7 @@ _TOOLS_BASE = [
         "description": "List files and folders in a directory.",
         "input_schema": {
             "type": "object",
-            "properties": {"path": {"type": "string", "description": "Directory path"}},
+            "properties": {"path": {"type": "string"}},
             "required": [],
         },
     },
@@ -148,12 +144,12 @@ _TOOLS_BASE = [
     # ── Memory ────────────────────────────────────────────────────────────────
     {
         "name": "remember",
-        "description": "Save a fact about Shehan for future sessions (e.g. preferences, habits).",
+        "description": "Save a fact about Shehan for future sessions.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "key": {"type": "string", "description": "Fact label"},
-                "value": {"type": "string", "description": "Fact value"},
+                "key": {"type": "string"},
+                "value": {"type": "string"},
             },
             "required": ["key", "value"],
         },
@@ -183,12 +179,12 @@ _TOOLS_BASE = [
     },
     {
         "name": "add_task",
-        "description": "Add a task to the task list with optional due date.",
+        "description": "Add a task with optional due date.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "task": {"type": "string"},
-                "due_date": {"type": "string", "description": "YYYY-MM-DD (optional)"},
+                "due_date": {"type": "string", "description": "YYYY-MM-DD"},
             },
             "required": ["task"],
         },
@@ -200,7 +196,7 @@ _TOOLS_BASE = [
     },
     {
         "name": "complete_task",
-        "description": "Mark a task as done by its ID.",
+        "description": "Mark a task as done by ID.",
         "input_schema": {
             "type": "object",
             "properties": {"task_id": {"type": "integer"}},
@@ -212,20 +208,61 @@ _TOOLS_BASE = [
         "description": "List tasks due today.",
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
+    {
+        "name": "learn_preference",
+        "description": "Silently save a preference or habit Shehan mentioned in passing. Call without announcing. Examples: 'schedule' + 'hates meetings before 10am', 'communication' + 'prefers bullet points'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "category": {"type": "string", "description": "Category: schedule|food|music|communication|health|work|social|other"},
+                "preference": {"type": "string", "description": "The preference or habit in plain language"},
+            },
+            "required": ["category", "preference"],
+        },
+    },
+    {
+        "name": "get_profile",
+        "description": "Return Shehan's full profile: all learned facts, preferences, and routines.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "update_routine",
+        "description": "Save or update one of Shehan's routines (morning, gym, work-start, bedtime, etc.).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "routine_name": {"type": "string"},
+                "description": {"type": "string"},
+            },
+            "required": ["routine_name", "description"],
+        },
+    },
+    {
+        "name": "log_mood",
+        "description": "Silently log Shehan's mood when emotional context is detectable. Never mention this to him.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "mood": {"type": "string", "description": "e.g. stressed, happy, tired, focused"},
+                "context": {"type": "string", "description": "Brief context (optional)"},
+            },
+            "required": ["mood"],
+        },
+    },
 
     # ── Gmail ─────────────────────────────────────────────────────────────────
     {
         "name": "gmail_unread",
-        "description": "Get unread emails. Flags [person] vs [auto] (newsletters/automated).",
+        "description": "Get unread emails. Flags [person] vs [auto].",
         "input_schema": {
             "type": "object",
-            "properties": {"max_results": {"type": "integer", "description": "Max emails (default 15)"}},
+            "properties": {"max_results": {"type": "integer"}},
             "required": [],
         },
     },
     {
         "name": "gmail_search",
-        "description": "Search Gmail by any query string (e.g. 'from:boss@company.com', 'subject:invoice').",
+        "description": "Search Gmail by query string.",
         "input_schema": {
             "type": "object",
             "properties": {"query": {"type": "string"}},
@@ -234,7 +271,7 @@ _TOOLS_BASE = [
     },
     {
         "name": "gmail_read_full",
-        "description": "Read the full body of an email by ID (use the ID from gmail_unread/gmail_search).",
+        "description": "Read the full body of an email by ID. Note: email content is sent to Gemini API.",
         "input_schema": {
             "type": "object",
             "properties": {"email_id": {"type": "string"}},
@@ -247,7 +284,7 @@ _TOOLS_BASE = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "to": {"type": "string", "description": "Recipient email address"},
+                "to": {"type": "string"},
                 "subject": {"type": "string"},
                 "body": {"type": "string"},
             },
@@ -277,7 +314,7 @@ _TOOLS_BASE = [
     },
     {
         "name": "gmail_important_check",
-        "description": "Check for emails from real people (not automated) in the last 24h.",
+        "description": "Check for emails from real people in the last 24h.",
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
 
@@ -294,7 +331,7 @@ _TOOLS_BASE = [
     },
     {
         "name": "calendar_week",
-        "description": "Get events for the next 7 days, grouped by day.",
+        "description": "Get events for the next 7 days.",
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
@@ -302,7 +339,7 @@ _TOOLS_BASE = [
         "description": "Get events starting within N minutes (default 30).",
         "input_schema": {
             "type": "object",
-            "properties": {"minutes": {"type": "integer", "description": "Look-ahead window in minutes"}},
+            "properties": {"minutes": {"type": "integer"}},
             "required": [],
         },
     },
@@ -315,7 +352,7 @@ _TOOLS_BASE = [
                 "title": {"type": "string"},
                 "date": {"type": "string", "description": "YYYY-MM-DD"},
                 "time": {"type": "string", "description": "HH:MM (24h)"},
-                "duration_minutes": {"type": "integer", "description": "Duration (default 60)"},
+                "duration_minutes": {"type": "integer"},
                 "description": {"type": "string"},
             },
             "required": ["title", "date", "time"],
@@ -337,7 +374,7 @@ _TOOLS_BASE = [
         "description": "Search and play a song, artist, or playlist on Spotify.",
         "input_schema": {
             "type": "object",
-            "properties": {"query": {"type": "string", "description": "Song name, artist, or playlist"}},
+            "properties": {"query": {"type": "string"}},
             "required": ["query"],
         },
     },
@@ -353,7 +390,7 @@ _TOOLS_BASE = [
     },
     {
         "name": "spotify_next",
-        "description": "Skip to the next track on Spotify.",
+        "description": "Skip to next track on Spotify.",
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
@@ -366,7 +403,7 @@ _TOOLS_BASE = [
         "description": "Set Spotify volume (0-100).",
         "input_schema": {
             "type": "object",
-            "properties": {"level": {"type": "integer", "description": "Volume 0-100"}},
+            "properties": {"level": {"type": "integer"}},
             "required": ["level"],
         },
     },
@@ -383,19 +420,19 @@ _TOOLS_BASE = [
     # ── News ──────────────────────────────────────────────────────────────────
     {
         "name": "news_headlines",
-        "description": "Get top headlines. category: general/tech/world/business. country: lk/us/gb/etc.",
+        "description": "Get top headlines. category: general/tech/world/business.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "category": {"type": "string", "description": "general|tech|world|business"},
-                "country": {"type": "string", "description": "Country code (default: lk)"},
+                "category": {"type": "string"},
+                "country": {"type": "string"},
             },
             "required": [],
         },
     },
     {
         "name": "news_search",
-        "description": "Search news by topic or keyword.",
+        "description": "Search news by topic.",
         "input_schema": {
             "type": "object",
             "properties": {"query": {"type": "string"}},
@@ -409,7 +446,6 @@ _TOOLS_BASE = [
     },
 ]
 
-# Desktop-only tools (excluded on Railway)
 _TOOLS_DESKTOP = [
     {
         "name": "open_url",
@@ -427,18 +463,18 @@ _TOOLS_DESKTOP = [
             "type": "object",
             "properties": {
                 "command": {"type": "string"},
-                "timeout": {"type": "integer", "description": "Timeout seconds (default 30)"},
+                "timeout": {"type": "integer"},
             },
             "required": ["command"],
         },
     },
     {
         "name": "whatsapp_send",
-        "description": "Send a WhatsApp message. Desktop only — requires WhatsApp Web logged in.",
+        "description": "Send a WhatsApp message. Desktop only.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "phone_number": {"type": "string", "description": "International format: +94771234567"},
+                "phone_number": {"type": "string"},
                 "message": {"type": "string"},
             },
             "required": ["phone_number", "message"],
@@ -450,7 +486,7 @@ _TOOLS_DESKTOP = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "name": {"type": "string", "description": "Contact name (partial match ok)"},
+                "name": {"type": "string"},
                 "message": {"type": "string"},
             },
             "required": ["name", "message"],
@@ -461,18 +497,17 @@ _TOOLS_DESKTOP = [
 TOOLS = _TOOLS_BASE + (_TOOLS_DESKTOP if DESKTOP_MODE else [])
 
 
-# ── Dispatcher ────────────────────────────────────────────────────────────────
-
 def handle_tool_call(name: str, inputs: dict) -> str:
     from tools import memory_tool, web_tool, system_tool, news_tool
 
-    # Lazy imports for optional tool modules
     def _try_import(module_name):
         try:
             import importlib
             return importlib.import_module(f"tools.{module_name}")
         except Exception:
             return None
+
+    PRIVACY_MODE = os.environ.get("PRIVACY_MODE", "false").lower() == "true"
 
     # ── Web
     if name == "web_search":
@@ -542,6 +577,14 @@ def handle_tool_call(name: str, inputs: dict) -> str:
         return memory_tool.complete_task(inputs["task_id"])
     if name == "list_tasks_due_today":
         return memory_tool.list_tasks_due_today()
+    if name == "learn_preference":
+        return memory_tool.learn_preference(inputs["category"], inputs["preference"])
+    if name == "get_profile":
+        return memory_tool.get_profile()
+    if name == "update_routine":
+        return memory_tool.update_routine(inputs["routine_name"], inputs["description"])
+    if name == "log_mood":
+        return memory_tool.log_mood(inputs["mood"], inputs.get("context", ""))
 
     # ── Gmail
     if name == "gmail_unread":
@@ -551,6 +594,8 @@ def handle_tool_call(name: str, inputs: dict) -> str:
         m = _try_import("gmail_tool")
         return m.gmail_search(inputs["query"]) if m else "Gmail not available."
     if name == "gmail_read_full":
+        if PRIVACY_MODE:
+            return "gmail_read_full is disabled in PRIVACY_MODE. Email content stays local."
         m = _try_import("gmail_tool")
         return m.gmail_read_full(inputs["email_id"]) if m else "Gmail not available."
     if name == "gmail_send":

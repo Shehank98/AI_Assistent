@@ -13,22 +13,42 @@ from google.genai import types
 from memory.store import MemoryStore
 from tools.registry import TOOLS, handle_tool_call, set_memory_store
 
-# ── Config ────────────────────────────────────────────────────────────────────
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 MODEL = "gemini-2.5-flash"
 
-SYSTEM_PROMPT = """You are Jarvis, Shehan's personal AI assistant. You talk like a smart friend — casual, direct, a little dry. Not corporate. Not sycophantic. No "certainly!" or "great question!" — just get to the point. Drop a dry joke occasionally. Use "Shehan" sometimes but not every message. Sound like someone who knows him well.
+SYSTEM_PROMPT = """You are Jarvis, Shehan's personal AI assistant.
 
-You have access to his Gmail, Google Calendar, Spotify, WhatsApp (desktop only), notes, files, web, weather, and news. Use tools proactively — don't just describe, DO.
+── WHO SHEHAN IS ──────────────────────────────────────────────────────────────
+Name: Shehan
+Location: Colombo, Sri Lanka
+Timezone: Asia/Colombo (UTC+5:30)
+Work: Data professional, web developer, builder of tools and automations
+Language: Respond in whatever language Shehan uses. Sinhala, Tamil, English, or mixed — match him.
 
-When he says "good morning", "what's new", "morning", "briefing", or "what's on today" — automatically run the morning briefing: call gmail_important_check, list_tasks_due_today, calendar_today, get_weather, news_headlines. Synthesise everything into one casual response. Don't list tool results robotically — weave them into a conversational update.
+── HOW YOU TALK ──────────────────────────────────────────────────────────────
+Talk like a smart friend. Address him as "bro" or "machan" casually. Use "sir" only when he's being formal or asks something serious. Never "certainly!", never "great question!", never corporate speak. Occasional dry humour. No sycophancy.
 
-You remember things about Shehan across sessions via the memory tools. When he tells you something personal or preferential, remember it.
+── MORNING BRIEFING ──────────────────────────────────────────────────────────
+When Shehan says "good morning", "machan", "bro what's up", "what's new", "morning", "morning briefing", or "what's on today" — automatically run the full briefing: call gmail_important_check, list_tasks_due_today, calendar_today, get_weather, news_headlines. Synthesise everything into one casual conversational response. Don't list tool results robotically — weave them into a natural update. End with something personal referencing his routines or upcoming schedule ("your standup's at 10 so you've got time").
 
-Be brief unless detail is requested. When uncertain, ask one short question. Never pad responses."""
+── VOICE-FIRST RESPONSE FORMAT ──────────────────────────────────────────────
+- Default: short, conversational. 1-3 sentences max unless detail is asked for.
+- Contractions always: it's, you've, I'll, don't — sounds more natural spoken.
+- Numbers naturally: "3pm" not "15:00". "half past 2" optionally.
+- If response has a list (emails, events, tasks), use natural language: "You've got 3 things — first..., second..., third..." not bullet points.
+- If response is data-heavy (more than 5 items): summarise verbally, show visually. "You've got 8 emails, most important are the 2 from real people — showing them now."
+- Never say "As an AI..." or "I don't have access to..." — either do it or say "can't do that one bro".
+- When uncertain, ask one short question.
+
+── PROACTIVE LEARNING ────────────────────────────────────────────────────────
+When Shehan mentions a preference, habit, or personal detail in passing, silently call learn_preference without announcing it. Examples: if he says "I usually wake up at 7", save it. If he says "I hate reply-all emails", save it. If he describes a routine (morning gym, evening walk), call update_routine. If emotional context is detectable (sounds stressed, happy, tired), call log_mood silently. Build his profile continuously — never announce you're saving something.
+
+── TOOLS ─────────────────────────────────────────────────────────────────────
+You have access to Gmail, Google Calendar, Spotify, notes, files, web, weather, news, and memory. Use tools proactively — don't just describe, DO. When he says "play something", play it. When he says "remind me", set a task. When he says "check my email", check it.
+
+You remember things about Shehan across sessions via memory tools. When he tells you something personal or preferential, call learn_preference silently and remember it."""
 
 
-# ── Tool format conversion (Anthropic → Gemini) ───────────────────────────────
 _TYPE_MAP = {
     "string": "STRING",
     "integer": "INTEGER",
@@ -40,7 +60,6 @@ _TYPE_MAP = {
 
 
 def _build_gemini_tools(anthropic_tools: list) -> list[types.Tool]:
-    """Convert Anthropic-format tool definitions to a single Gemini Tool."""
     declarations = []
     for t in anthropic_tools:
         schema = t.get("input_schema", {})
@@ -55,7 +74,6 @@ def _build_gemini_tools(anthropic_tools: list) -> list[types.Tool]:
             properties=props,
             required=schema.get("required", []),
         ) if props else None
-
         declarations.append(types.FunctionDeclaration(
             name=t["name"],
             description=t["description"],
@@ -64,7 +82,6 @@ def _build_gemini_tools(anthropic_tools: list) -> list[types.Tool]:
     return [types.Tool(function_declarations=declarations)]
 
 
-# ── Jarvis Core ───────────────────────────────────────────────────────────────
 class Jarvis:
     def __init__(self, voice_mode: bool = False):
         if not GEMINI_API_KEY:
@@ -77,7 +94,6 @@ class Jarvis:
         self._client = genai.Client(api_key=GEMINI_API_KEY)
         self.memory = MemoryStore()
         set_memory_store(self.memory)
-        # Conversation stored as list[types.Content] — Gemini's native format
         self.conversation: list[types.Content] = []
         self.voice_mode = voice_mode
         self._alert_queues: set = set()
@@ -85,9 +101,24 @@ class Jarvis:
 
     def _build_system(self) -> str:
         facts = self.memory.get_all_facts()
+        prefs = self.memory.get_preferences()
+        routines = self.memory.get_routines()
+
+        extra = []
         if facts:
-            facts_str = "\n".join(f"- {k}: {v}" for k, v in facts.items())
-            return SYSTEM_PROMPT + f"\n\nWhat Jarvis knows about Shehan:\n{facts_str}"
+            extra.append("What Jarvis knows about Shehan:\n" + "\n".join(f"- {k}: {v}" for k, v in facts.items()))
+        if prefs:
+            by_cat: dict = {}
+            for p in prefs:
+                by_cat.setdefault(p["category"], []).append(p["preference"])
+            extra.append("Learned preferences:\n" + "\n".join(
+                f"- {cat}: " + "; ".join(ps) for cat, ps in by_cat.items()
+            ))
+        if routines:
+            extra.append("Known routines:\n" + "\n".join(f"- {n}: {d}" for n, d in routines.items()))
+
+        if extra:
+            return SYSTEM_PROMPT + "\n\n" + "\n\n".join(extra)
         return SYSTEM_PROMPT
 
     def _run_agentic_loop(self, user_input: str) -> str:
@@ -110,22 +141,16 @@ class Jarvis:
 
             candidate = response.candidates[0]
             content = candidate.content
-
-            # Record the model turn
             self.conversation.append(content)
 
-            # Collect any function calls in this turn
             fn_calls = [p for p in content.parts if p.function_call is not None]
 
             if not fn_calls:
-                # No tool calls — extract text and return
                 text = " ".join(
-                    p.text for p in content.parts
-                    if p.text is not None
+                    p.text for p in content.parts if p.text is not None
                 ).strip()
                 return text
 
-            # Execute every tool call, collect responses
             fn_response_parts = []
             for part in fn_calls:
                 fc = part.function_call
@@ -141,13 +166,11 @@ class Jarvis:
                     )
                 )
 
-            # Feed all results back in a single user turn
             self.conversation.append(
                 types.Content(role="user", parts=fn_response_parts)
             )
 
     def chat(self, user_input: str, silent: bool = False) -> str:
-        """Process one turn. silent=True suppresses console prints (used by server)."""
         if not silent:
             print(f"\n[You] {user_input}")
         response = self._run_agentic_loop(user_input)
@@ -156,7 +179,6 @@ class Jarvis:
         return response
 
     def _broadcast_alert(self, message: str):
-        """Push an alert to all connected WebSocket clients."""
         dead = set()
         for q in self._alert_queues:
             try:
@@ -166,7 +188,6 @@ class Jarvis:
         self._alert_queues -= dead
 
     async def proactive_check(self):
-        """Background task — checks every 15 min and pushes alerts to connected clients."""
         from datetime import datetime
         from tools.gmail_tool import gmail_important_check
         from tools.calendar_tool import calendar_upcoming
@@ -241,7 +262,6 @@ class Jarvis:
                 break
 
 
-# ── Entry Point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import sys
     voice = "--voice" in sys.argv

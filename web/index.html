@@ -14,7 +14,7 @@
 </head>
 <body>
 
-  <!-- Notification banner for proactive alerts -->
+  <!-- Notification banner -->
   <div id="alert-banner" class="alert-banner hidden">
     <span id="alert-text"></span>
     <button id="alert-close">✕</button>
@@ -22,8 +22,9 @@
 
   <!-- Header -->
   <header>
-    <div id="status-dot" class="dot offline" title="Connecting..."></div>
+    <div id="jarvis-avatar" class="avatar" title="Jarvis">J</div>
     <h1>J.A.R.V.I.S</h1>
+    <div id="status-dot" class="dot offline" title="Connecting..."></div>
     <button id="settings-btn" class="icon-btn" title="Settings">⚙</button>
   </header>
 
@@ -33,6 +34,17 @@
   <!-- Footer / Input -->
   <footer>
     <div id="input-row">
+      <div id="mic-wrap">
+        <button id="mic-btn" class="icon-btn mic" title="Voice input">🎤</button>
+        <div id="mic-ring" class="mic-ring"></div>
+      </div>
+      <div id="waveform" class="waveform hidden">
+        <div class="wbar"></div>
+        <div class="wbar"></div>
+        <div class="wbar"></div>
+        <div class="wbar"></div>
+        <div class="wbar"></div>
+      </div>
       <textarea
         id="text-input"
         placeholder="Message Jarvis..."
@@ -41,7 +53,6 @@
         autocorrect="on"
         spellcheck="true"
       ></textarea>
-      <button id="mic-btn" class="icon-btn mic" title="Voice input">🎤</button>
       <button id="send-btn" class="send-btn" title="Send">▶</button>
     </div>
     <div id="voice-status"></div>
@@ -61,6 +72,11 @@
     </div>
 
     <div class="setting-row">
+      <label for="continuous-toggle">Continuous mode</label>
+      <input type="checkbox" id="continuous-toggle" class="toggle">
+    </div>
+
+    <div class="setting-row">
       <span>Connection</span>
       <span id="conn-status-text" class="status-text">—</span>
     </div>
@@ -68,6 +84,11 @@
     <div class="setting-row">
       <span>Tools active</span>
       <span id="tool-count-text" class="status-text">—</span>
+    </div>
+
+    <div class="setting-row" id="token-row">
+      <label for="token-input" style="font-size:13px">Access token</label>
+      <input type="password" id="token-input" class="token-input" placeholder="JARVIS_ACCESS_TOKEN" autocomplete="current-password">
     </div>
 
     <button id="clear-btn" class="danger-btn">Clear conversation</button>
