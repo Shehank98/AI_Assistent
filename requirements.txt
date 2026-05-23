@@ -1,0 +1,22 @@
+# JARVIS — Python requirements
+# ─────────────────────────────────────────────────────────────────
+# Core (always required)
+anthropic>=0.25.0
+
+# Voice — Speech to Text (install when ready for voice mode)
+# openai-whisper
+# pyaudio          # may need: brew install portaudio  OR  apt install portaudio19-dev
+
+# Voice — Text to Speech (pick one or all, they cascade)
+# pyttsx3          # always works, robotic voice, no setup needed
+# TTS              # Coqui TTS — local, decent quality: pip install TTS
+# elevenlabs       # Best quality — set ELEVENLABS_API_KEY env var
+
+# Wake word (optional, install last)
+# pvporcupine      # Picovoice — free tier works fine
+
+# Memory (included in stdlib — sqlite3 is built-in, no install needed)
+
+# Useful extras
+# requests         # nicer HTTP than urllib
+# python-dotenv    # load .env file for API keys
