@@ -497,19 +497,25 @@ _TOOLS_BASE = [
     # ── Gmail ─────────────────────────────────────────────────────────────────
     {
         "name": "gmail_unread",
-        "description": "Get unread emails. Flags [person] vs [auto].",
+        "description": "Get unread emails. Flags [person] vs [auto]. account=1 primary, account=2 secondary.",
         "input_schema": {
             "type": "object",
-            "properties": {"max_results": {"type": "integer"}},
+            "properties": {
+                "max_results": {"type": "integer"},
+                "account": {"type": "integer", "description": "1=primary (default), 2=secondary"},
+            },
             "required": [],
         },
     },
     {
         "name": "gmail_search",
-        "description": "Search Gmail by query string.",
+        "description": "Search Gmail by query string. account=1 or 2 to target a specific inbox.",
         "input_schema": {
             "type": "object",
-            "properties": {"query": {"type": "string"}},
+            "properties": {
+                "query": {"type": "string"},
+                "account": {"type": "integer", "description": "1=primary (default), 2=secondary"},
+            },
             "required": ["query"],
         },
     },
@@ -558,7 +564,12 @@ _TOOLS_BASE = [
     },
     {
         "name": "gmail_important_check",
-        "description": "Check for emails from real people in the last 24h.",
+        "description": "Check all configured Gmail accounts for emails from real people in the last 24h.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "gmail_all_accounts_summary",
+        "description": "Get unread count and important email summary for all configured Gmail accounts. Use for morning briefing and proactive notifications.",
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
 
@@ -960,10 +971,10 @@ def handle_tool_call(name: str, inputs: dict) -> str:
     # ── Gmail
     if name == "gmail_unread":
         m = _try_import("gmail_tool")
-        return m.gmail_unread(inputs.get("max_results", 15)) if m else "Gmail not available."
+        return m.gmail_unread(inputs.get("max_results", 15), inputs.get("account", 1)) if m else "Gmail not available."
     if name == "gmail_search":
         m = _try_import("gmail_tool")
-        return m.gmail_search(inputs["query"]) if m else "Gmail not available."
+        return m.gmail_search(inputs["query"], inputs.get("account", 1)) if m else "Gmail not available."
     if name == "gmail_read_full":
         if PRIVACY_MODE:
             return "gmail_read_full is disabled in PRIVACY_MODE. Email content stays local."
@@ -981,6 +992,9 @@ def handle_tool_call(name: str, inputs: dict) -> str:
     if name == "gmail_important_check":
         m = _try_import("gmail_tool")
         return m.gmail_important_check() if m else "Gmail not available."
+    if name == "gmail_all_accounts_summary":
+        m = _try_import("gmail_tool")
+        return m.gmail_all_accounts_summary() if m else "Gmail not available."
 
     # ── Calendar
     if name == "calendar_today":
