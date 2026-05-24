@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Header
-from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -145,6 +145,18 @@ async def startup():
         # Kick off first world-state build
         from agent.observer import refresh_world_state
         asyncio.create_task(refresh_world_state(j.memory))
+
+        # Restore Spotify token from memory store (survives container restarts)
+        try:
+            import base64
+            from auth.spotify_oauth import TOKEN_PATH
+            saved = j.memory.recall("_spotify_token_b64")
+            if saved and not TOKEN_PATH.exists():
+                TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
+                TOKEN_PATH.write_bytes(base64.b64decode(saved))
+                print("[spotify] Token restored from memory store.")
+        except Exception:
+            pass
 
         # Set up pgvector RAG store (no-op if DATABASE_URL not set)
         if os.environ.get("DATABASE_URL"):
@@ -445,14 +457,75 @@ async def google_oauth_callback(code: str = "", error: str = ""):
     })
 
 
-@app.get("/auth/spotify")
-async def spotify_oauth_callback(code: str = "", error: str = ""):
-    if error:
-        return JSONResponse({"error": error}, status_code=400)
-    return JSONResponse({
-        "message": "Spotify OAuth code received. Run auth/spotify_oauth.py locally for setup.",
-        "code": code,
+@app.get("/auth/spotify/start")
+async def spotify_start():
+    """Redirect browser to Spotify authorization page."""
+    import urllib.parse
+    client_id     = os.environ.get("SPOTIFY_CLIENT_ID", "")
+    redirect_uri  = os.environ.get("SPOTIFY_REDIRECT_URI", "")
+    if not client_id or not redirect_uri:
+        return HTMLResponse(
+            "<h2>Missing env vars</h2>"
+            "<p>Set <code>SPOTIFY_CLIENT_ID</code> and <code>SPOTIFY_REDIRECT_URI</code> in Railway.</p>",
+            status_code=400,
+        )
+    from auth.spotify_oauth import SCOPES
+    params = urllib.parse.urlencode({
+        "client_id": client_id,
+        "response_type": "code",
+        "redirect_uri": redirect_uri,
+        "scope": SCOPES,
     })
+    return RedirectResponse(f"https://accounts.spotify.com/authorize?{params}")
+
+
+@app.get("/callback")
+async def spotify_callback(code: str = "", error: str = ""):
+    """Handle Spotify OAuth redirect — exchange code, save token, reload Jarvis spotify tools."""
+    if error:
+        return HTMLResponse(f"<h2>Spotify error: {error}</h2>", status_code=400)
+    if not code:
+        return HTMLResponse("<h2>No code received.</h2>", status_code=400)
+
+    try:
+        import base64, json
+        import spotipy
+        from spotipy.oauth2 import SpotifyOAuth
+        from auth.spotify_oauth import TOKEN_PATH, SCOPES
+
+        client_id     = os.environ.get("SPOTIFY_CLIENT_ID", "")
+        client_secret = os.environ.get("SPOTIFY_CLIENT_SECRET", "")
+        redirect_uri  = os.environ.get("SPOTIFY_REDIRECT_URI", "")
+
+        TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
+        auth = SpotifyOAuth(
+            client_id=client_id,
+            client_secret=client_secret,
+            redirect_uri=redirect_uri,
+            scope=SCOPES,
+            cache_path=str(TOKEN_PATH),
+            open_browser=False,
+        )
+        auth.get_access_token(code, as_dict=False, check_cache=False)
+
+        # Persist token in memory store so it survives container restarts
+        token_b64 = base64.b64encode(TOKEN_PATH.read_bytes()).decode()
+        try:
+            j = get_jarvis()
+            j.memory.remember("_spotify_token_b64", token_b64)
+        except Exception:
+            pass
+
+        return HTMLResponse("""
+<!DOCTYPE html><html><head><meta charset="UTF-8">
+<style>body{font-family:monospace;background:#03040a;color:#00e5ff;
+  display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center;}
+h1{font-size:2em;} p{color:#b8ccd8;margin-top:12px;}</style></head>
+<body><div><h1>✓ Spotify Connected</h1>
+<p>You can close this tab.<br>Tell Jarvis to play something.</p></div></body></html>
+""")
+    except Exception as exc:
+        return HTMLResponse(f"<h2>Auth failed: {exc}</h2>", status_code=500)
 
 
 # ── WebSocket ─────────────────────────────────────────────────────────────────
