@@ -688,6 +688,41 @@ _TOOLS_BASE = [
         "description": "Get latest tech news (TechCrunch).",
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
+
+    # ── RAG / Document Knowledge Base ─────────────────────────────────────────
+    {
+        "name": "query_docs",
+        "description": (
+            "Semantic search across all uploaded files — Excel sheets, PDFs, CSVs, text docs. "
+            "Use whenever the user asks about data or content from a file they've uploaded. "
+            "Always cite the source file, sheet, and row range in your answer."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Natural language search query"},
+                "k": {"type": "integer", "description": "Number of results (default 5)"},
+                "source": {"type": "string", "description": "Optional: filter by filename"},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "list_documents",
+        "description": "List all files that have been uploaded and indexed in the knowledge base.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "delete_document",
+        "description": "Remove a file and all its content from the knowledge base by filename.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "source": {"type": "string", "description": "Exact filename to delete"},
+            },
+            "required": ["source"],
+        },
+    },
 ]
 
 _TOOLS_DESKTOP = [
@@ -1007,5 +1042,16 @@ def handle_tool_call(name: str, inputs: dict) -> str:
     if name == "whatsapp_send_to_contact":
         m = _try_import("whatsapp_tool")
         return m.whatsapp_send_to_contact(inputs["name"], inputs["message"]) if m else "WhatsApp not available."
+
+    # ── RAG / Document Knowledge Base
+    if name == "query_docs":
+        from tools.rag_tool import query_docs
+        return query_docs(inputs["query"], inputs.get("k", 5), inputs.get("source", ""))
+    if name == "list_documents":
+        from tools.rag_tool import list_documents
+        return list_documents()
+    if name == "delete_document":
+        from tools.rag_tool import delete_document
+        return delete_document(inputs["source"])
 
     return f"Unknown tool: {name}"

@@ -58,6 +58,8 @@ const alertClose      = document.getElementById('alert-close');
 const jarvisAvatar    = document.getElementById('jarvis-avatar');
 const tokenInput      = document.getElementById('token-input');
 const stopBtn         = document.getElementById('stop-btn');
+const uploadBtn       = document.getElementById('upload-btn');
+const fileInput       = document.getElementById('file-input');
 
 // Approval modal DOM
 const approvalOverlay  = document.getElementById('approval-overlay');
@@ -830,6 +832,40 @@ async function fetchStatus() {
 // ── Input events ──────────────────────────────────────────────────────────────
 sendBtn.addEventListener('click', () => sendMessage(textInput.value));
 micBtn.addEventListener('click', toggleListening);
+
+// ── File upload ───────────────────────────────────────────────────────────────
+if (uploadBtn && fileInput) {
+  uploadBtn.addEventListener('click', () => fileInput.click());
+
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+    fileInput.value = '';
+
+    appendMessage('system', `Uploading ${file.name}…`);
+    uploadBtn.disabled = true;
+    uploadBtn.textContent = '⏳';
+
+    try {
+      const res = await apiFetch('/api/upload', {
+        method: 'POST',
+        headers: { 'X-Filename': file.name, 'Content-Type': file.type || 'application/octet-stream' },
+        body: await file.arrayBuffer(),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        appendMessage('system', `Indexed ${data.chunks} chunks from "${data.filename}". Ask Jarvis about it.`);
+      } else {
+        appendMessage('error', data.detail || 'Upload failed.');
+      }
+    } catch (err) {
+      appendMessage('error', `Upload error: ${err.message}`);
+    } finally {
+      uploadBtn.disabled = false;
+      uploadBtn.textContent = '📎';
+    }
+  });
+}
 
 if (stopBtn) {
   stopBtn.addEventListener('click', () => {

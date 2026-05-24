@@ -146,6 +146,14 @@ async def startup():
         from agent.observer import refresh_world_state
         asyncio.create_task(refresh_world_state(j.memory))
 
+        # Set up pgvector RAG store (no-op if DATABASE_URL not set)
+        if os.environ.get("DATABASE_URL"):
+            try:
+                from rag.store import setup as rag_setup
+                await asyncio.get_event_loop().run_in_executor(None, rag_setup)
+            except Exception as exc:
+                print(f"[rag] pgvector setup failed (run CREATE EXTENSION vector in Railway DB console): {exc}")
+
     except ValueError as exc:
         print(f"\n{'='*60}\n⚠️  JARVIS NOT READY\n{exc}\n{'='*60}\n")
 
@@ -328,6 +336,61 @@ async def tts_endpoint(req: TTSRequest):
         )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"ElevenLabs error: {e}")
+
+
+@app.post("/api/upload")
+async def upload_document(request: Request):
+    """
+    Upload a document into the RAG knowledge base.
+    Send file bytes as the body; set X-Filename header to the original filename.
+    Supports: .xlsx, .xls, .csv, .pdf, .txt, .md
+    """
+    import tempfile
+    from fastapi import HTTPException
+
+    if not os.environ.get("DATABASE_URL"):
+        raise HTTPException(status_code=503, detail="RAG store unavailable — DATABASE_URL not set.")
+
+    filename = request.headers.get("X-Filename", "upload.bin").strip()
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=400, detail="Empty file body.")
+
+    suffix = Path(filename).suffix or ".bin"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(body)
+        tmp_path = tmp.name
+
+    try:
+        from rag.ingest import ingest_file
+        loop = asyncio.get_event_loop()
+        chunk_count, fmt = await loop.run_in_executor(None, ingest_file, tmp_path)
+        return {
+            "filename": filename,
+            "format": fmt,
+            "chunks": chunk_count,
+            "message": f"Indexed {chunk_count} chunks from '{filename}'. Ask Jarvis about it.",
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Ingestion failed: {exc}")
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+
+
+@app.get("/api/documents")
+async def list_documents_endpoint():
+    """List all documents indexed in the RAG knowledge base."""
+    if not os.environ.get("DATABASE_URL"):
+        return JSONResponse({"error": "RAG store unavailable"}, status_code=503)
+    try:
+        from rag.store import list_sources
+        sources = list_sources()
+        return {"documents": sources, "count": len(sources)}
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
 
 
 @app.post("/api/stt")
