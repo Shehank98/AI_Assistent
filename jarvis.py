@@ -183,9 +183,10 @@ class Jarvis:
             resp = self._client.models.generate_content(model=MODEL, contents=convo, config=cfg)
             content = resp.candidates[0].content
             convo.append(content)
-            fn_calls = [p for p in content.parts if p.function_call is not None]
+            parts_safe = content.parts or []
+            fn_calls = [p for p in parts_safe if p.function_call is not None]
             if not fn_calls:
-                return " ".join(p.text for p in content.parts if p.text).strip()
+                return " ".join(p.text for p in parts_safe if p.text).strip()
             parts = []
             for part in fn_calls:
                 fc = part.function_call
@@ -216,15 +217,20 @@ class Jarvis:
                 config=config,
             )
 
+            if not response.candidates:
+                return "[No response from Gemini — may have been safety-filtered]"
             candidate = response.candidates[0]
             content = candidate.content
+            if content is None:
+                return "[Response blocked by safety filter]"
             self.conversation.append(content)
 
-            fn_calls = [p for p in content.parts if p.function_call is not None]
+            parts_safe = content.parts or []
+            fn_calls = [p for p in parts_safe if p.function_call is not None]
 
             if not fn_calls:
                 text = " ".join(
-                    p.text for p in content.parts if p.text is not None
+                    p.text for p in parts_safe if p.text is not None
                 ).strip()
                 return text
 
