@@ -119,7 +119,10 @@ def _load_pptx(file_path: str) -> list[dict]:
 
 def _lc_load(file_path: str) -> list[dict]:
     """Use a LangChain loader, split with RecursiveCharacterTextSplitter."""
-    from langchain_core.text_splitter import RecursiveCharacterTextSplitter
+    try:
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
+    except ImportError:
+        from langchain.text_splitter import RecursiveCharacterTextSplitter
     ext = Path(file_path).suffix.lower()
     source = Path(file_path).name
 

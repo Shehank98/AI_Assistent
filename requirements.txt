@@ -44,8 +44,9 @@ trafilatura>=1.8.0
 youtube-transcript-api>=0.6.2
 
 # RAG — LangChain document loaders + format support
-langchain-community>=0.2.0   # loaders: PDF, Word, HTML, JSON, text
-langchain-core>=0.2.0        # Document class, text splitter
+langchain-community>=0.2.0      # loaders: PDF, Word, HTML, JSON, text
+langchain-core>=0.2.0           # Document class
+langchain-text-splitters>=0.2.0 # RecursiveCharacterTextSplitter (moved here in 0.2+)
 pandas>=2.0.0                # Excel + CSV (both .xls and .xlsx via engine dispatch)
 xlrd>=2.0.1                  # .xls engine for pandas (old Excel format)
 openpyxl>=3.1.0              # .xlsx engine for pandas
