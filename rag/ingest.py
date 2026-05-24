@@ -1,182 +1,186 @@
 """
-rag/ingest.py — Document loaders for Jarvis knowledge base.
-Supports: Excel (.xlsx/.xls), CSV, PDF, plain text/markdown.
-All formats are chunked and stored via rag.store.
+rag/ingest.py — LangChain-powered document ingestion for Jarvis.
+
+Supported formats:
+  .xlsx, .xls, .xlsm  — pandas (openpyxl / xlrd engines, handles both old and new Excel)
+  .csv                 — pandas
+  .pdf                 — LangChain PyPDFLoader (pypdf)
+  .docx                — LangChain Docx2txtLoader (docx2txt)
+  .pptx                — python-pptx (slide-by-slide extraction)
+  .txt, .md, .rst      — LangChain TextLoader
+  .html, .htm          — LangChain BSHTMLLoader
+  .json                — LangChain JSONLoader
+  anything else        — TextLoader fallback
 """
 
 from pathlib import Path
 
 
-def _chunk_text(
-    text: str,
-    source: str,
-    metadata: dict,
-    chunk_size: int = 400,
-    overlap: int = 40,
-) -> list[dict]:
-    """Split text into overlapping word-based chunks."""
-    words = text.split()
-    chunks = []
-    i = 0
-    while i < len(words):
-        chunk_words = words[i : i + chunk_size]
-        content = " ".join(chunk_words).strip()
-        if content:
-            chunks.append({"content": content, "source": source, "metadata": metadata})
-        i += chunk_size - overlap
-        if i >= len(words):
-            break
-    return chunks
+# ── Excel (.xlsx and .xls) ────────────────────────────────────────────────────
 
+def _load_excel(file_path: str) -> list[dict]:
+    import pandas as pd
 
-def ingest_excel(file_path: str) -> int:
-    """Chunk an Excel workbook by sheet + row ranges. Returns chunk count."""
-    try:
-        import openpyxl
-    except ImportError:
-        raise ImportError("pip install openpyxl")
-
-    from . import store
-
-    wb = openpyxl.load_workbook(file_path, data_only=True)
     source = Path(file_path).name
-    all_chunks = []
+    chunks = []
     ROWS_PER_CHUNK = 25
 
-    for sheet_name in wb.sheetnames:
-        ws = wb[sheet_name]
-        rows = list(ws.iter_rows(values_only=True))
-        if not rows:
+    # pandas auto-selects engine: openpyxl for .xlsx, xlrd for .xls
+    xl = pd.ExcelFile(file_path)
+    for sheet_name in xl.sheet_names:
+        df = xl.parse(sheet_name)
+        if df.empty:
             continue
 
-        # Treat first row as headers
-        headers = [
-            str(c).strip() if c is not None else f"col_{i}"
-            for i, c in enumerate(rows[0])
-        ]
+        # Build row strings
+        row_strs = []
+        for idx, row in df.iterrows():
+            parts = [
+                f"{col}: {val}"
+                for col, val in row.items()
+                if val is not None and str(val).strip() and str(val) != "nan"
+            ]
+            if parts:
+                row_strs.append(f"Row {idx + 1}: " + " | ".join(parts))
 
-        for start in range(1, len(rows), ROWS_PER_CHUNK):
-            batch = rows[start : start + ROWS_PER_CHUNK]
-            lines = []
-            for row_idx, row in enumerate(batch):
-                parts = [
-                    f"{headers[i]}: {v}"
-                    for i, v in enumerate(row)
-                    if v is not None and str(v).strip()
-                ]
-                if parts:
-                    lines.append(
-                        f"Row {start + row_idx + 1}: " + " | ".join(parts)
-                    )
-            if lines:
-                all_chunks.append(
-                    {
-                        "content": "\n".join(lines),
-                        "source": source,
-                        "metadata": {
-                            "file": source,
-                            "sheet": sheet_name,
-                            "row_start": start + 1,
-                            "row_end": start + len(batch),
-                        },
-                    }
-                )
-
-    return store.add_chunks(all_chunks)
-
-
-def ingest_csv(file_path: str) -> int:
-    """Chunk a CSV file by row ranges. Returns chunk count."""
-    import csv
-    from . import store
-
-    source = Path(file_path).name
-    all_chunks = []
-    ROWS_PER_CHUNK = 30
-
-    with open(file_path, newline="", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        rows = list(reader)
-
-    for start in range(0, len(rows), ROWS_PER_CHUNK):
-        batch = rows[start : start + ROWS_PER_CHUNK]
-        lines = [
-            f"Row {start + i + 1}: "
-            + " | ".join(f"{k}: {v}" for k, v in row.items() if v and str(v).strip())
-            for i, row in enumerate(batch)
-        ]
-        lines = [l for l in lines if l.strip()]
-        if lines:
-            all_chunks.append(
-                {
-                    "content": "\n".join(lines),
+        for start in range(0, len(row_strs), ROWS_PER_CHUNK):
+            batch = row_strs[start : start + ROWS_PER_CHUNK]
+            if batch:
+                chunks.append({
+                    "content": "\n".join(batch),
                     "source": source,
                     "metadata": {
                         "file": source,
+                        "sheet": sheet_name,
                         "row_start": start + 1,
                         "row_end": start + len(batch),
                     },
-                }
-            )
-
-    return store.add_chunks(all_chunks)
+                })
+    return chunks
 
 
-def ingest_pdf(file_path: str) -> int:
-    """Extract text from PDF and chunk it. Returns chunk count."""
-    from . import store
+# ── CSV ───────────────────────────────────────────────────────────────────────
+
+def _load_csv(file_path: str) -> list[dict]:
+    import pandas as pd
 
     source = Path(file_path).name
-    text = ""
+    chunks = []
+    ROWS_PER_CHUNK = 30
 
+    df = pd.read_csv(file_path)
+    for start in range(0, len(df), ROWS_PER_CHUNK):
+        batch = df.iloc[start : start + ROWS_PER_CHUNK]
+        rows = []
+        for idx, row in batch.iterrows():
+            parts = [
+                f"{col}: {val}"
+                for col, val in row.items()
+                if val is not None and str(val).strip() and str(val) != "nan"
+            ]
+            if parts:
+                rows.append(f"Row {idx + 1}: " + " | ".join(parts))
+        if rows:
+            chunks.append({
+                "content": "\n".join(rows),
+                "source": source,
+                "metadata": {"file": source, "row_start": start + 1, "row_end": start + len(batch)},
+            })
+    return chunks
+
+
+# ── PowerPoint ────────────────────────────────────────────────────────────────
+
+def _load_pptx(file_path: str) -> list[dict]:
     try:
-        import pdfplumber
-        with pdfplumber.open(file_path) as pdf:
-            for page in pdf.pages:
-                text += (page.extract_text() or "") + "\n"
+        from pptx import Presentation
     except ImportError:
-        try:
-            import fitz
-            doc = fitz.open(file_path)
-            text = "\n".join(page.get_text() for page in doc)
-        except ImportError:
-            raise ImportError(
-                "Install a PDF library: pip install pdfplumber   or   pip install PyMuPDF"
-            )
-
-    chunks = _chunk_text(text, source=source, metadata={"file": source, "type": "pdf"})
-    return store.add_chunks(chunks)
-
-
-def ingest_text(file_path: str) -> int:
-    """Chunk a plain text / markdown file. Returns chunk count."""
-    from . import store
+        raise ImportError("pip install python-pptx")
 
     source = Path(file_path).name
-    text = Path(file_path).read_text(encoding="utf-8", errors="ignore")
-    ext = Path(file_path).suffix.lower().lstrip(".")
-    chunks = _chunk_text(text, source=source, metadata={"file": source, "type": ext or "text"})
-    return store.add_chunks(chunks)
+    prs = Presentation(file_path)
+    chunks = []
+    for slide_num, slide in enumerate(prs.slides, 1):
+        texts = [
+            shape.text.strip()
+            for shape in slide.shapes
+            if hasattr(shape, "text") and shape.text.strip()
+        ]
+        if texts:
+            chunks.append({
+                "content": "\n".join(texts),
+                "source": source,
+                "metadata": {"file": source, "slide": slide_num},
+            })
+    return chunks
 
+
+# ── LangChain-based loaders (PDF, Word, HTML, JSON, plain text) ───────────────
+
+def _lc_load(file_path: str) -> list[dict]:
+    """Use a LangChain loader, split with RecursiveCharacterTextSplitter."""
+    from langchain_core.text_splitter import RecursiveCharacterTextSplitter
+    ext = Path(file_path).suffix.lower()
+    source = Path(file_path).name
+
+    # Pick loader
+    if ext == ".pdf":
+        from langchain_community.document_loaders import PyPDFLoader
+        loader = PyPDFLoader(file_path)
+    elif ext == ".docx":
+        from langchain_community.document_loaders import Docx2txtLoader
+        loader = Docx2txtLoader(file_path)
+    elif ext in (".html", ".htm"):
+        from langchain_community.document_loaders import BSHTMLLoader
+        loader = BSHTMLLoader(file_path)
+    elif ext == ".json":
+        from langchain_community.document_loaders import JSONLoader
+        loader = JSONLoader(file_path, jq_schema=".", text_content=False)
+    else:
+        # .txt, .md, .rst, .log and unknown types
+        from langchain_community.document_loaders import TextLoader
+        loader = TextLoader(file_path, encoding="utf-8")
+
+    docs = loader.load()
+
+    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    split_docs = splitter.split_documents(docs)
+
+    return [
+        {
+            "content": doc.page_content,
+            "source": source,
+            "metadata": {**doc.metadata, "file": source},
+        }
+        for doc in split_docs
+        if doc.page_content.strip()
+    ]
+
+
+# ── Public entry point ────────────────────────────────────────────────────────
 
 def ingest_file(file_path: str) -> tuple[int, str]:
     """
-    Auto-detect format and ingest a file into the RAG store.
+    Auto-detect format, parse, chunk, embed, and store in pgvector.
     Returns (chunk_count, format_name).
     """
+    from rag.store import add_chunks
+
     ext = Path(file_path).suffix.lower()
 
     if ext in (".xlsx", ".xls", ".xlsm", ".xlsb"):
-        return ingest_excel(file_path), "excel"
+        chunks = _load_excel(file_path)
+        fmt = "excel"
     elif ext == ".csv":
-        return ingest_csv(file_path), "csv"
-    elif ext == ".pdf":
-        return ingest_pdf(file_path), "pdf"
-    elif ext in (".txt", ".md", ".rst", ".log"):
-        return ingest_text(file_path), "text"
+        chunks = _load_csv(file_path)
+        fmt = "csv"
+    elif ext in (".pptx", ".ppt"):
+        chunks = _load_pptx(file_path)
+        fmt = "powerpoint"
     else:
-        # Attempt as plain text for unknown types
-        try:
-            return ingest_text(file_path), "text"
-        except Exception as e:
-            raise ValueError(f"Unsupported file type '{ext}': {e}")
+        # PDF, Word, HTML, JSON, text — all via LangChain
+        chunks = _lc_load(file_path)
+        fmt = ext.lstrip(".") or "text"
+
+    count = add_chunks(chunks)
+    return count, fmt

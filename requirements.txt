@@ -43,10 +43,15 @@ trafilatura>=1.8.0
 # YouTube transcript extraction (no API key needed)
 youtube-transcript-api>=0.6.2
 
-# RAG — document ingestion
-openpyxl>=3.1.0           # Excel (.xlsx/.xls)
-# pdfplumber>=0.10.0      # PDF — uncomment to enable PDF uploads
-# PyMuPDF>=1.24.0         # PDF fallback — uncomment if pdfplumber fails
+# RAG — LangChain document loaders + format support
+langchain-community>=0.2.0   # loaders: PDF, Word, HTML, JSON, text
+langchain-core>=0.2.0        # Document class, text splitter
+pandas>=2.0.0                # Excel + CSV (both .xls and .xlsx via engine dispatch)
+xlrd>=2.0.1                  # .xls engine for pandas (old Excel format)
+openpyxl>=3.1.0              # .xlsx engine for pandas
+pypdf>=4.0.0                 # PDF via LangChain PyPDFLoader
+docx2txt>=0.8                # Word (.docx) via LangChain Docx2txtLoader
+python-pptx>=0.6.23          # PowerPoint (.pptx) — parsed directly
 
 # WhatsApp (desktop only — requires WhatsApp Web in browser)
 # pywhatkit>=5.4
