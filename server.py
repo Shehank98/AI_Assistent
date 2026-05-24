@@ -471,28 +471,47 @@ async def websocket_endpoint(websocket: WebSocket, token: str = ""):
         return
 
     jarvis = get_jarvis()
-    q: asyncio.Queue = asyncio.Queue()
-    _ws_clients.add(q)
+    alert_q: asyncio.Queue = asyncio.Queue()  # outbound alerts/approvals
+    msg_q: asyncio.Queue = asyncio.Queue()    # inbound user messages
+    _ws_clients.add(alert_q)
 
     async def _send_alerts():
+        """Push queued alerts/approvals to client continuously."""
         while True:
-            alert = await q.get()
+            payload = await alert_q.get()
             try:
-                await websocket.send_json(alert)
+                await websocket.send_json(payload)
             except Exception:
                 break
 
+    async def _recv_loop():
+        """
+        Continuously receive WS frames — runs CONCURRENTLY with the Jarvis executor.
+        This is what allows approval_response to arrive while Jarvis is mid-turn.
+        """
+        while True:
+            try:
+                data = await websocket.receive_json()
+                if data.get("type") == "approval_response":
+                    from agent.approval import respond_approval
+                    respond_approval(
+                        data.get("approval_id", ""),
+                        bool(data.get("granted", False)),
+                    )
+                else:
+                    await msg_q.put(data)
+            except Exception:
+                await msg_q.put(None)   # sentinel — signals connection closed
+                break
+
     alert_task = asyncio.create_task(_send_alerts())
+    recv_task  = asyncio.create_task(_recv_loop())
 
     try:
         while True:
-            data = await websocket.receive_json()
-
-            # Approval response (from PWA modal)
-            if data.get("type") == "approval_response":
-                from agent.approval import respond_approval
-                respond_approval(data.get("approval_id", ""), bool(data.get("granted", False)))
-                continue
+            data = await msg_q.get()
+            if data is None:
+                break   # connection closed
 
             message = (data.get("message") or data.get("content") or "").strip()
             if not message:
@@ -507,7 +526,6 @@ async def websocket_endpoint(websocket: WebSocket, token: str = ""):
                 "turns": len(jarvis.conversation) // 2,
             })
 
-            # Background: silent memory extraction (no latency impact)
             async def _extract(u=message, r=response):
                 try:
                     from agent.memory_engine import extract_from_conversation
@@ -517,6 +535,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str = ""):
                 except Exception:
                     pass
             asyncio.create_task(_extract())
+
     except WebSocketDisconnect:
         pass
     except Exception as e:
@@ -526,7 +545,8 @@ async def websocket_endpoint(websocket: WebSocket, token: str = ""):
             pass
     finally:
         alert_task.cancel()
-        _ws_clients.discard(q)
+        recv_task.cancel()
+        _ws_clients.discard(alert_q)
 
 
 # ── Static Files (PWA) ────────────────────────────────────────────────────────
