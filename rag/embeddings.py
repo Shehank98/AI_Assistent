@@ -1,8 +1,8 @@
 """
-rag/embeddings.py — Gemini REST embedding (v1 stable endpoint, not v1beta).
+rag/embeddings.py — Gemini REST embedding with automatic version/model fallback.
 
-The google-genai SDK defaults to v1beta which doesn't expose text-embedding-004.
-We call the stable v1 REST API directly to avoid that routing issue.
+Tries all combinations of API version + model until one works,
+because Google moves models between v1 and v1beta without notice.
 """
 
 import json
@@ -10,19 +10,20 @@ import os
 import urllib.error
 import urllib.request
 
-EMBED_MODEL = "text-embedding-004"
 EMBEDDING_DIM = 768
-_API_BASE = "https://generativelanguage.googleapis.com/v1"
+_API_ROOT = "https://generativelanguage.googleapis.com"
 
-# Alternative models to try if primary fails (same 768-dim family)
-_FALLBACK_MODELS = [
-    "text-embedding-004",
-    "embedding-001",
+# Ordered list of (api_version, model) to try — first success wins
+_CANDIDATES = [
+    ("v1beta", "text-embedding-004"),
+    ("v1",     "text-embedding-004"),
+    ("v1beta", "embedding-001"),
+    ("v1",     "embedding-001"),
 ]
 
 
 def embed_text(text: str) -> list[float]:
-    """Embed a single string. Returns 768 floats. Self-heals across model names."""
+    """Embed a single string. Returns 768 floats. Tries all API version/model combos."""
     text = text.strip()
     if not text:
         return [0.0] * EMBEDDING_DIM
@@ -31,25 +32,24 @@ def embed_text(text: str) -> list[float]:
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY not set — cannot embed.")
 
-    # Truncate to avoid hitting input token limits
     text = text[:8000]
 
     last_error = None
-    for model in _FALLBACK_MODELS:
+    for api_ver, model in _CANDIDATES:
         try:
-            return _call_embed_api(text, model, api_key)
+            return _call_embed_api(text, model, api_ver, api_key)
         except RuntimeError as e:
             last_error = e
             continue
 
     raise RuntimeError(
-        f"All embedding models failed. Last error: {last_error}\n"
-        "Check GEMINI_API_KEY is valid and has Gemini API access."
+        f"All embedding attempts failed. Last error: {last_error}\n"
+        "Check GEMINI_API_KEY is valid and has Gemini API access at aistudio.google.com."
     )
 
 
-def _call_embed_api(text: str, model: str, api_key: str) -> list[float]:
-    url = f"{_API_BASE}/models/{model}:embedContent?key={api_key}"
+def _call_embed_api(text: str, model: str, api_ver: str, api_key: str) -> list[float]:
+    url = f"{_API_ROOT}/{api_ver}/models/{model}:embedContent?key={api_key}"
     payload = json.dumps({
         "model": f"models/{model}",
         "content": {"parts": [{"text": text}]},
@@ -66,11 +66,11 @@ def _call_embed_api(text: str, model: str, api_key: str) -> list[float]:
             data = json.loads(resp.read())
         values = data.get("embedding", {}).get("values", [])
         if not values:
-            raise RuntimeError(f"Empty embedding returned by {model}")
+            raise RuntimeError(f"Empty embedding returned by {api_ver}/{model}")
         return values
     except urllib.error.HTTPError as exc:
         body = exc.read().decode(errors="ignore")
-        raise RuntimeError(f"HTTP {exc.code} from {model}: {body[:300]}")
+        raise RuntimeError(f"HTTP {exc.code} from {api_ver}/{model}: {body[:300]}")
     except urllib.error.URLError as exc:
         raise RuntimeError(f"Network error reaching Gemini API: {exc.reason}")
 
