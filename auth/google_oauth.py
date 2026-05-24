@@ -74,7 +74,15 @@ def get_credentials():
             if TOKEN_PATH.parent.exists():
                 TOKEN_PATH.write_text(creds.to_json())
         except Exception as e:
-            print(f"[google_oauth] Token refresh failed: {e}")
+            err_str = str(e)
+            if "invalid_scope" in err_str:
+                print(
+                    "[google_oauth] Token refresh failed: scopes have changed since last auth.\n"
+                    "  → Re-run: python auth/google_oauth.py   (locally, not on Railway)\n"
+                    "  → Then update GOOGLE_TOKEN_B64 in Railway dashboard."
+                )
+            else:
+                print(f"[google_oauth] Token refresh failed: {e}")
             creds = None
 
     if not creds:
