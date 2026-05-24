@@ -92,9 +92,16 @@ def _build_gemini_tools(anthropic_tools: list) -> list[types.Tool]:
         schema = t.get("input_schema", {})
         props = {}
         for name, prop in schema.get("properties", {}).items():
+            prop_type = _TYPE_MAP.get(prop.get("type", "string"), "STRING")
+            items_schema = None
+            if prop_type == "ARRAY" and prop.get("items"):
+                items_schema = types.Schema(
+                    type=_TYPE_MAP.get(prop["items"].get("type", "string"), "STRING"),
+                )
             props[name] = types.Schema(
-                type=_TYPE_MAP.get(prop.get("type", "string"), "STRING"),
+                type=prop_type,
                 description=prop.get("description", ""),
+                items=items_schema,
             )
         parameters = types.Schema(
             type="OBJECT",
