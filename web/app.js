@@ -1,5 +1,10 @@
 'use strict';
 
+// ── Service Worker ────────────────────────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 const WS_BACKOFF = [1000, 2000, 4000, 8000, 16000, 30000];
 const ALERT_DURATION = 8000;
@@ -183,11 +188,20 @@ function appendMessage(role, text) {
   div.className = `message ${role}`;
 
   if (role === 'jarvis') {
-    div.innerHTML = renderMarkdown(text);
+    const label = document.createElement('span');
+    label.className = 'msg-label';
+    label.textContent = 'JARVIS';
+    div.appendChild(label);
+    const content = document.createElement('div');
+    content.innerHTML = renderMarkdown(text);
+    div.appendChild(content);
     const timeEl = document.createElement('time');
     timeEl.className = 'msg-time';
     timeEl.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     div.appendChild(timeEl);
+  } else if (role === 'thinking') {
+    div.textContent = text.replace('…', '');
+    // CSS ::after handles the blinking cursor
   } else {
     div.textContent = text;
     if (role === 'user') {

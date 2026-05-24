@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <meta name="theme-color" content="#0a0a0f">
+  <meta name="theme-color" content="#03040a">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -18,14 +18,14 @@
   <div id="approval-overlay" class="approval-overlay hidden">
     <div id="approval-card" class="approval-card">
       <div class="approval-header">
-        <span class="approval-icon">⚠️</span>
+        <span class="approval-icon">⚠</span>
         <span id="approval-action" class="approval-action"></span>
       </div>
       <pre id="approval-preview" class="approval-preview"></pre>
       <div class="approval-timer-bar"><div id="approval-timer-fill" class="approval-timer-fill"></div></div>
       <div class="approval-buttons">
-        <button id="approval-deny"    class="approval-btn deny">Cancel</button>
-        <button id="approval-approve" class="approval-btn approve">Do it ✓</button>
+        <button id="approval-deny"    class="approval-btn deny">[ CANCEL ]</button>
+        <button id="approval-approve" class="approval-btn approve">[ EXECUTE ]</button>
       </div>
     </div>
   </div>
@@ -51,11 +51,11 @@
   <footer>
     <div id="input-row">
       <div id="mic-wrap">
-        <button id="mic-btn" class="icon-btn mic" title="Voice input">🎤</button>
+        <button id="mic-btn" class="icon-btn mic" title="Voice input">◉</button>
         <div id="mic-ring" class="mic-ring"></div>
       </div>
       <input type="file" id="file-input" accept=".xlsx,.xls,.xlsm,.csv,.pdf,.docx,.pptx,.txt,.md,.html,.json" style="display:none">
-      <button id="upload-btn" class="icon-btn" title="Upload file to knowledge base">📎</button>
+      <button id="upload-btn" class="icon-btn" title="Upload file to knowledge base">⊕</button>
       <div id="waveform" class="waveform hidden">
         <div class="wbar"></div>
         <div class="wbar"></div>
@@ -65,13 +65,13 @@
       </div>
       <textarea
         id="text-input"
-        placeholder="Message Jarvis…"
+        placeholder="// input command..."
         rows="1"
         autocomplete="off"
         autocorrect="on"
         spellcheck="true"
       ></textarea>
-      <button id="stop-btn" class="stop-btn" title="Stop / Interrupt" style="display:none">⬛</button>
+      <button id="stop-btn" class="stop-btn" title="Stop / Interrupt" style="display:none">■</button>
       <button id="send-btn" class="send-btn" title="Send">▶</button>
     </div>
     <div id="voice-status"></div>
@@ -81,7 +81,7 @@
   <div id="settings-overlay" class="hidden"></div>
   <aside id="settings-drawer" class="closed">
     <div class="drawer-header">
-      <h2>Settings</h2>
+      <h2>// Config</h2>
       <button id="settings-close" class="icon-btn">✕</button>
     </div>
 
@@ -97,8 +97,8 @@
 
     <div class="setting-row">
       <div style="display:flex;flex-direction:column;gap:2px">
-        <label for="server-stt-toggle" style="font-size:14px">Server STT</label>
-        <span style="font-size:11px;color:var(--text-muted)">Better accuracy for Sinhala &amp; Tamil</span>
+        <label for="server-stt-toggle" style="font-size:12px">Server STT</label>
+        <span style="font-size:10px;color:var(--text-muted);letter-spacing:0.03em">Better accuracy for Sinhala &amp; Tamil</span>
       </div>
       <input type="checkbox" id="server-stt-toggle" class="toggle">
     </div>
@@ -114,16 +114,16 @@
     </div>
 
     <div class="setting-row" id="token-row">
-      <label for="token-input" style="font-size:13px">Access token</label>
+      <label for="token-input" style="font-size:12px">Access token</label>
       <input type="password" id="token-input" class="token-input" placeholder="JARVIS_ACCESS_TOKEN" autocomplete="current-password">
     </div>
 
-    <button id="clear-btn" class="danger-btn">Clear conversation</button>
+    <button id="clear-btn" class="danger-btn">⌦ Clear conversation</button>
 
     <div class="memory-section">
-      <h3>What Jarvis remembers</h3>
+      <h3>// Memory store</h3>
       <div id="memory-list" class="memory-list">Loading...</div>
-      <button id="refresh-memory" class="secondary-btn">Refresh</button>
+      <button id="refresh-memory" class="secondary-btn">↺ Refresh</button>
     </div>
   </aside>
 
